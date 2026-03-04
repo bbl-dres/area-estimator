@@ -2,26 +2,6 @@
 
 A tool to estimate building volumes using building footprints and high-resolution Swiss elevation models (swissALTI3D and swissSURFACE3D).
 
-## Table of Contents
-
-- [Overview](#overview)
-- [How It Works](#how-it-works)
-- [Requirements](#requirements)
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [Usage Examples](#usage-examples)
-- [Command-Line Reference](#command-line-reference)
-- [Output](#output)
-- [Technical Details](#technical-details)
-- [Accuracy & Limitations](#accuracy--limitations)
-- [Data Sources](#data-sources)
-- [Version History](#version-history)
-- [License](#license)
-- [Contributing](#contributing)
-- [Acknowledgments](#acknowledgments)
-
----
-
 ## Overview
 
 This tool estimates building volumes by combining:
