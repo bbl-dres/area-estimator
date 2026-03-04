@@ -1,0 +1,19 @@
+# Roof Estimator Dependencies
+# Install with: pip install -r requirements.txt
+
+# GDB file reading
+fiona>=1.9.0
+
+# 3D mesh processing and analysis
+trimesh>=4.0.0
+numpy>=1.24.0
+
+# Data handling and output
+pandas>=2.0.0
+
+# Optional: Progress bars for large datasets
+# tqdm>=4.65.0
+
+# Image processing
+rasterio>=1.3.0
+shapely>=2.0.0

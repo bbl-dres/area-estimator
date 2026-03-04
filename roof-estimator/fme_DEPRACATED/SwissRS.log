@@ -1,0 +1,127 @@
+2026-01-14 20:31:28|   0.0|  0.0|INFORM|Current FME version: FME 2025.0.3.0 (20250602 - Build 25241 - WIN64)
+2026-01-14 20:31:28|   0.0|  0.0|INFORM|System Time: 20260114193128 UTC
+2026-01-14 20:31:28|   0.0|  0.0|INFORM|FME_HOME is 'C:\Program Files\FME\'
+2026-01-14 20:31:28|   0.0|  0.0|INFORM|FME Form (floating)
+2026-01-14 20:31:28|   0.0|  0.0|INFORM|Permanent License.
+2026-01-14 20:31:28|   0.0|  0.0|INFORM|Machine host name is: DESKTOP-BIEK64S
+2026-01-14 20:31:28|   0.0|  0.0|INFORM|OS Locale Name     : en_CH
+2026-01-14 20:31:28|   0.0|  0.0|INFORM|OS Locale Encoding : windows-1252
+2026-01-14 20:31:28|   0.0|  0.0|INFORM|Process Encoding   : UTF-8
+2026-01-14 20:31:28|   0.0|  0.0|INFORM|FME API version: '4.0 20240722'
+2026-01-14 20:31:28|   0.0|  0.0|INFORM|FME Configuration: FME_BASE is 'no'
+2026-01-14 20:31:28|   0.0|  0.0|INFORM|FME Configuration: FME_MF_DIR is 'C:\Users\DavidRasner\Documents\GitHub\OpenBuildings\workers\roof-estimator\fme_DEPRACATED/'
+2026-01-14 20:31:28|   0.0|  0.0|INFORM|FME Configuration: FME_MF_NAME is 'SwissRS.fmw'
+2026-01-14 20:31:28|   0.0|  0.0|INFORM|FME Configuration: FME_PRODUCT_NAME is 'FME(R) 2025.0.3.0'
+2026-01-14 20:31:28|   0.0|  0.0|INFORM|Operating System: Microsoft Windows 10 64-bit  (Build 19045)
+2026-01-14 20:31:28|   0.0|  0.0|INFORM|FME Platform: WIN64
+2026-01-14 20:31:28|   0.0|  0.0|INFORM|System Status: 120.69 GB of disk space available in the FME temporary folder (C:\Users\DAVIDR~1\AppData\Local\Temp\wbrun_1768412069722_35236\fmetmp_4)
+2026-01-14 20:31:28|   0.0|  0.0|INFORM|System Status: 31.72 GB of physical memory available
+2026-01-14 20:31:28|   0.0|  0.0|INFORM|System Status: 126.88 GB of virtual memory available
+2026-01-14 20:31:28|   0.0|  0.0|INFORM|START - ProcessID: 38156, peak process memory usage: 41920 kB, current process memory usage: 41912 kB
+2026-01-14 20:31:28|   0.0|  0.0|INFORM|FME Configuration: Command line arguments are `C:\Program Files\FME\fme.exe' `C:\Users\DavidRasner\Documents\GitHub\OpenBuildings\workers\roof-estimator\fme_DEPRACATED\wb-xlate-1768419086317_35236' `--FME_LAUNCH_VIEWER_APP' `WORKBENCH' `LOG_STANDARDOUT' `YES' `LOG_TIMINGS' `YES' `LogCountServerName' `52622' `LOG_STANDARDOUT' `No' `WORKBENCH_LOG_SERVER' `52616'
+2026-01-14 20:31:28|   0.0|  0.0|INFORM|FME Configuration: Connection Storage: 'C:\Users\DavidRasner\AppData\Roaming\Safe Software\FME\'
+2026-01-14 20:31:28|   0.2|  0.2|INFORM|Shared folders for formats are : C:\Program Files\FME\datasources;C:\Users\DavidRasner\AppData\Roaming\Safe Software\FME\FME Store\Formats;C:\Users\DavidRasner\Documents\FME\Formats
+2026-01-14 20:31:28|   0.2|  0.0|INFORM|Shared folders for transformers are : C:\Users\DavidRasner\AppData\Roaming\Safe Software\FME\Packages\25241-win64\transformers;C:\Program Files\FME\transformers;C:\Users\DavidRasner\AppData\Roaming\Safe Software\FME\FME Store\Transformers
+2026-01-14 20:31:28|   0.2|  0.0|INFORM|Shared folders for coordinate systems are : C:\Users\DavidRasner\Documents\FME\CoordinateSystems
+2026-01-14 20:31:28|   0.2|  0.0|INFORM|Shared folders for coordinate system exceptions are : C:\Users\DavidRasner\Documents\FME\CoordinateSystemExceptions
+2026-01-14 20:31:28|   0.2|  0.0|INFORM|Shared folders for coordinate system grid overrides are : C:\Users\DavidRasner\Documents\FME\CoordinateSystemGridOverrides
+2026-01-14 20:31:28|   0.2|  0.0|INFORM|Shared folders for CS-MAP transformation exceptions are : C:\Users\DavidRasner\Documents\FME\CsmapTransformationExceptions
+2026-01-14 20:31:28|   0.2|  0.0|INFORM|Shared folders for transformer categories are : C:\Users\DavidRasner\Documents\FME\TransformerCategories
+2026-01-14 20:31:28|   0.2|  0.0|INFORM|FME Configuration: No destination coordinate system set
+2026-01-14 20:31:28|   0.2|  0.0|INFORM|FME Configuration: Current working folder is `C:\Users\DavidRasner\Documents\GitHub\OpenBuildings\workers\roof-estimator\fme_DEPRACATED'
+2026-01-14 20:31:28|   0.2|  0.0|INFORM|FME Configuration: Temporary folder is `C:\Users\DAVIDR~1\AppData\Local\Temp\wbrun_1768412069722_35236\fmetmp_4', set from environment variable `FME_TEMP'
+2026-01-14 20:31:28|   0.2|  0.0|INFORM|FME Configuration: Cache folder is 'C:\Users\DAVIDR~1\AppData\Local\Temp'
+2026-01-14 20:31:28|   0.2|  0.0|INFORM|FME Configuration: FME_HOME is `C:\Program Files\FME\'
+2026-01-14 20:31:28|   0.2|  0.0|INFORM|FME Configuration: Start freeing memory when the process exceeds 95.16 GB
+2026-01-14 20:31:28|   0.2|  0.0|INFORM|FME Configuration: Stop freeing memory when the process is below 71.37 GB
+2026-01-14 20:31:28|   0.3|  0.1|INFORM|Creating writer for format: 
+2026-01-14 20:31:28|   0.4|  0.1|INFORM|Creating reader for format: 
+2026-01-14 20:31:28|   0.4|  0.0|INFORM|MULTI_READER(MULTI_READER): Will fail with first member reader failure
+2026-01-14 20:31:28|   0.4|  0.0|INFORM|Using Multi Reader with keyword `MULTI_READER' to read multiple datasets
+2026-01-14 20:31:28|   0.4|  0.0|INFORM|Using MultiWriter with keyword `MULTI_DEST' to output data (ID_ATTRIBUTE is `multi_writer_id')
+2026-01-14 20:31:28|   0.4|  0.0|INFORM|Using Python interpreter from `C:\Program Files\FME\fmepython313\python313.dll' with PYTHONHOME `C:\Program Files\FME\fmepython313'
+2026-01-14 20:31:28|   0.4|  0.0|INFORM|Python version 3.13 loaded successfully
+2026-01-14 20:31:28|   0.4|  0.0|INFORM|Adding folder `C:\Users\DavidRasner\Documents\GitHub\OpenBuildings\workers\roof-estimator\fme_DEPRACATED' to the python path
+2026-01-14 20:31:29|   0.7|  0.3|INFORM|Emptying factory pipeline
+2026-01-14 20:31:29|   0.7|  0.0|STATS |Restoring 1 feature(s) from FME feature store file `C:\Users\DAVIDR~1\AppData\Local\Temp\wb-cache-SwissRS-tHnbJf\Main_FeatureReader -1 2 fo 1 GEOTIFF  0  a5b2f1c4bc06d8a49050bbc9d0f4991819ad425e.ffs'
+2026-01-14 20:31:29|   1.1|  0.4|INFORM|Creating reader for format: GeoTIFF (Geo-referenced Tagged Image File Format)
+2026-01-14 20:31:29|   1.1|  0.0|INFORM|Trying to find a DYNAMIC plugin for reader named `GEOTIFF'
+2026-01-14 20:31:29|   1.1|  0.0|INFORM|GEOTIFF reader: Directive '_READ_OFFSETS_IN_CS_UNITS' has value 'No'
+2026-01-14 20:31:29|   1.1|  0.0|INFORM|GEOTIFF reader: Directive '_PREFER_FILE_CS_UNITS' has value 'Yes'
+2026-01-14 20:31:29|   1.1|  0.0|INFORM|GEOTIFF reader: Directive '_IGNORE_RASTER_TYPE_KEY' has value 'No'
+2026-01-14 20:31:29|   1.1|  0.0|INFORM|GEOTIFF reader: Directive '_LENIENT_READ' has value 'Yes'
+2026-01-14 20:31:29|   1.1|  0.0|INFORM|GEOTIFF reader: Opening file 'D:\SwissRS\SWISSIMAGE-RS_10cm_Example.tif'
+2026-01-14 20:31:29|   1.1|  0.0|INFORM|GEOTIFF reader: Directive '_SCALE_COLOR_TO_STANDARD_BIT_DEPTH' has value 'NO'
+2026-01-14 20:31:29|   1.1|  0.0|INFORM|GEOTIFF reader: Directive '_APPLY_GCPS' has the value 'NO'
+2026-01-14 20:31:29|   1.1|  0.0|INFORM|Successfully read world file 'D:\SwissRS\SWISSIMAGE-RS_10cm_Example.tfw'
+2026-01-14 20:31:30|   1.6|  0.5|INFORM|Creating reader for format: Esri Geodatabase (File Geodb)
+2026-01-14 20:31:30|   2.0|  0.4|INFORM|Trying to find a DYNAMIC plugin for reader named `GEODATABASE_FILE'
+2026-01-14 20:31:30|   2.0|  0.0|INFORM|FeatureReader_2 (QueryFactory): Performing query against GEODATABASE_FILE dataset `D:\swissbuildings3d_3_0_2025_2056_5728\SWISSBUILDINGS3D_3_0.gdb'
+2026-01-14 20:31:30|   2.0|  0.0|INFORM|Notice - Performing envelope query on the `GEODATABASE_FILE' reader, post-filtering spatial predicate in FME
+2026-01-14 20:31:30|   2.0|  0.0|INFORM|Opening the Esri Geodatabase reader
+2026-01-14 20:31:38|   4.0|  2.0|INFORM|The ArcObjects license 'Basic' is being selected from the ESRILicenseInfo ArcObjects call
+2026-01-14 20:31:39|   4.9|  0.9|INFORM|FME has checked out an Esri license. The product checked out is 'Basic'
+2026-01-14 20:31:39|   4.9|  0.0|INFORM|Installed ArcGIS version is '3.5.1'
+2026-01-14 20:31:39|   5.1|  0.2|INFORM|Connected to the File Geodatabase at 'D:\swissbuildings3d_3_0_2025_2056_5728\SWISSBUILDINGS3D_3_0.gdb'
+2026-01-14 20:31:39|   5.1|  0.0|INFORM|File Geodatabase release: '10.0'
+2026-01-14 20:31:39|   5.1|  0.0|INFORM|R_2 Reader: Using Enhanced geometry
+2026-01-14 20:31:39|   5.1|  0.0|INFORM|All network information will be ignored. As a result, edges will be treated as polyline features and junctions will be treated as point features
+2026-01-14 20:31:39|   5.1|  0.0|INFORM|All relationship information will be ignored. As a result, simple relationships will not be read, and attributed relationships will be read as tables
+2026-01-14 20:31:39|   5.1|  0.0|INFORM|The minimum (x,y) and maximum (x,y) bounds, respectively, of the search envelope being used are: (2600008.1, 1197600.6) , (2601008.2, 1198600.7000000002)
+2026-01-14 20:31:39|   5.1|  0.0|INFORM|GEODATABASE_FILE reader: Creating bulk features from individual features
+2026-01-14 20:31:39|   5.1|  0.0|INFORM|Creating reader for format: Esri Geodatabase (File Geodb)
+2026-01-14 20:31:39|   5.1|  0.0|INFORM|Trying to find a DYNAMIC plugin for reader named `GEODATABASE_FILE'
+2026-01-14 20:31:39|   5.1|  0.0|INFORM|Opening the Esri Geodatabase reader
+2026-01-14 20:31:39|   5.1|  0.0|INFORM|An ArcGIS license is already checked out. The product checked out is 'Basic'
+2026-01-14 20:31:39|   5.1|  0.0|INFORM|Installed ArcGIS version is '3.5.1'
+2026-01-14 20:31:39|   5.1|  0.0|INFORM|Connected to the File Geodatabase at 'D:\swissbuildings3d_3_0_2025_2056_5728\SWISSBUILDINGS3D_3_0.gdb'
+2026-01-14 20:31:39|   5.2|  0.1|INFORM|File Geodatabase release: '10.0'
+2026-01-14 20:31:40|   6.1|  0.9|INFORM|The OGC definition of the FME coordinate system '_CH1903Plus_1.LV95/01_0' is 'PROJCS["CH1903+_LV95",GEOGCS["GCS_CH1903+",DATUM["D_CH1903+",SPHEROID["Bessel_1841",6377397.155,299.1528128]],PRIMEM["Greenwich",0.0],UNIT["Degree",0.0174532925199433]],PROJECTION["Hotine_Oblique_Mercator_Azimuth_Center"],PARAMETER["False_Easting",2600000.0],PARAMETER["False_Northing",1200000.0],PARAMETER["Scale_Factor",1.0],PARAMETER["Azimuth",90.0],PARAMETER["Longitude_Of_Center",7.439583333333333],PARAMETER["Latitude_Of_Center",46.95240555555556],UNIT["Meter",1.0]]'
+2026-01-14 20:31:40|   6.1|  0.0|INFORM|Closing the Esri Geodatabase reader
+2026-01-14 20:31:40|   6.1|  0.0|INFORM|Merged 1 schema features read from 1 datasets into 1 resulting feature types
+2026-01-14 20:31:40|   6.1|  0.0|INFORM|GEODATABASE_FILE reader: Creating bulk features from individual features
+2026-01-14 20:32:06|  18.6| 12.5|INFORM|Reading feature type 'separated/Roof'
+2026-01-14 20:32:06|  18.6|  0.0|INFORM|FME Configuration: Source coordinate system for reader R_2[GEODATABASE_FILE] set to `_CH1903Plus_1.LV95/01_0' as read from input data
+2026-01-14 20:32:06|  18.6|  0.0|INFORM|Coordinate System `_CH1903Plus_1.LV95/01_0' parameters: CS_NAME=`_CH1903Plus_1.LV95/01_0' CS_ORIGINAL_NAME=`CH1903Plus_1.LV95/01' DESC_NM=`CH1903+ / LV95' DT_NAME=`CH1903Plus_1' EPSG_QD=`1' ESRI_WKT=`PROJCS["CH1903+_LV95",GEOGCS["GCS_CH1903+",DATUM["D_CH1903+",SPHEROID["Bessel_1841",6377397.155,299.1528128]],PRIMEM["Greenwich",0.0],UNIT["Degree",0.0174532925199433]],PROJECTION["Hotine_Oblique_Mercator_Azimuth_Center"],PARAMETER["False_Easting",2600000.0],PARAMETER["False_Northing",1200000.0],PARAMETER["Scale_Factor",1.0],PARAMETER["Azimuth",90.0],PARAMETER["Longitude_Of_Center",7.439583333333333],PARAMETER["Latitude_Of_Center",46.95240555555556],UNIT["Meter",1.0]]' GROUP=`SWITZERLAND' MAP_SCL=`1' MAX_LAT=`48' MAX_LNG=`11.05' MIN_LAT=`45.63333333333333' MIN_LNG=`5.4' ORG_LAT=`46.95240555555556' ORG_LNG=`7.439583333333333' PROJ=`SWISS' QUAD=`1' SCL_RED=`1' SOURCE=`EPSG, V6.3, 2056 [Large and medium scale topographic mappi]' UNIT=`Meter' X_OFF=`2600000' Y_OFF=`1200000' ZERO_X=`0.0001' ZERO_Y=`0.0001'
+2026-01-14 20:32:10|  22.1|  3.5|INFORM|FeatureReader_2_separated/Roof Feature Recorder -1 2147876869 (RecorderFactory): Splitting bulk features into individual features
+2026-01-14 20:32:10|  22.4|  0.3|STATS |Restoring 1 feature(s) from FME feature store file `C:\Users\DAVIDR~1\AppData\Local\Temp\wb-cache-SwissRS-tHnbJf\Main_RasterExpressionEvaluator -1 29 fo 0 RESULT  0  26d93cffcc4c24e1cb537b545d1b59a76d87fb86.ffs'
+2026-01-14 20:32:10|  22.4|  0.0|WARN  |The current FME process locale has been changed from 'English_Switzerland.utf8' to 'English_Switzerland.1252' and FME has restored it back to 'English_Switzerland.utf8'. It is undefined behavior to call 'setlocale()' in plugin code and doing so may cause unexpected errors
+2026-01-14 20:32:10|  22.5|  0.1|INFORM|Closing the Esri Geodatabase reader
+2026-01-14 20:32:10|  22.6|  0.1|STATS |CoordinateSystemSetter_2 (TeeFactory): Cloned 100 input feature(s) into 100 output feature(s)
+2026-01-14 20:32:10|  22.6|  0.0|STATS |SurfaceFootprintReplacer_Rejector (ExecuteFunctionFactory): Executed FME Functions on 100 input feature(s) -- 100 feature(s) completed and 0 feature(s) rejected
+2026-01-14 20:32:10|  22.6|  0.0|STATS |AttributeExposer (TeeFactory): Cloned 100 input feature(s) into 100 output feature(s)
+2026-01-14 20:32:10|  22.6|  0.0|INFORM|Clipper (ClipperFactory): Clipping.  Processed 1 candidates so far.
+2026-01-14 20:32:14|  26.3|  3.7|INFORM|Optional `process_group' method not present; not called
+2026-01-14 20:32:15|  26.4|  0.1|STATS |Destination Feature Type Routing Correlator (RoutingFactory): Tested 96 input feature(s), wrote 96 output feature(s): 0 matched merge filters, 0 were routed to output, 96 could not be routed.
+2026-01-14 20:32:15|  26.4|  0.0|STATS |Final Output Nuker (TeeFactory): Cloned 96 input feature(s) into 0 output feature(s)
+2026-01-14 20:32:15|  26.4|  0.0|WARN  |=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+2026-01-14 20:32:15|  26.4|  0.0|WARN  |      Features not written - verify feature type fanout/dynamic settings
+2026-01-14 20:32:15|  26.4|  0.0|WARN  |=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+2026-01-14 20:32:15|  26.4|  0.0|WARN  |  (Check that fanout/dynamic feature type attribute exists and has a value)
+2026-01-14 20:32:15|  26.4|  0.0|WARN  |=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+2026-01-14 20:32:15|  26.4|  0.0|WARN  |                                                                            96
+2026-01-14 20:32:15|  26.4|  0.0|WARN  |==============================================================================
+2026-01-14 20:32:15|  26.4|  0.0|WARN  |Total features not written                                                  96
+2026-01-14 20:32:15|  26.4|  0.0|WARN  |=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+2026-01-14 20:32:15|  26.4|  0.0|STATS |=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+2026-01-14 20:32:15|  26.4|  0.0|STATS |                            Features Read Summary
+2026-01-14 20:32:15|  26.4|  0.0|STATS |=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+2026-01-14 20:32:15|  26.4|  0.0|STATS |==============================================================================
+2026-01-14 20:32:15|  26.4|  0.0|STATS |Total Features Read                                                          0
+2026-01-14 20:32:15|  26.4|  0.0|STATS |=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+2026-01-14 20:32:15|  26.4|  0.0|STATS |=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+2026-01-14 20:32:15|  26.4|  0.0|STATS |                           Features Written Summary
+2026-01-14 20:32:15|  26.4|  0.0|STATS |=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+2026-01-14 20:32:15|  26.4|  0.0|STATS |==============================================================================
+2026-01-14 20:32:15|  26.4|  0.0|STATS |Total Features Written                                                       0
+2026-01-14 20:32:15|  26.4|  0.0|STATS |=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+2026-01-14 20:32:15|  26.4|  0.0|WARN  |-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-
+2026-01-14 20:32:15|  26.4|  0.0|WARN  |-~                                                                             ~-
+2026-01-14 20:32:15|  26.4|  0.0|WARN  |-~    Feature caches have been recorded at every stage of the translation.     ~-
+2026-01-14 20:32:15|  26.4|  0.0|WARN  |-~                      To inspect the recorded features,                      ~-
+2026-01-14 20:32:15|  26.4|  0.0|WARN  |-~              click the feature cache icons next to the ports.               ~-
+2026-01-14 20:32:15|  26.4|  0.0|WARN  |-~                                                                             ~-
+2026-01-14 20:32:15|  26.4|  0.0|WARN  |-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-
+2026-01-14 20:32:15|  26.4|  0.0|INFORM|Translation was SUCCESSFUL with 17 warning(s) (0 feature(s) output)
+2026-01-14 20:32:15|  26.4|  0.0|INFORM|FME Session Duration: 47.2 seconds. (CPU: 16.9s user, 9.5s system)
+2026-01-14 20:32:15|  26.4|  0.0|INFORM|END - ProcessID: 38156, peak process memory usage: 645496 kB, current process memory usage: 403888 kB

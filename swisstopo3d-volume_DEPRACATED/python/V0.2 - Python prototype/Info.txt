@@ -1,0 +1,6 @@
+# Open Command Prompt (Windows+R, type "cmd")
+# Navigate to your script directory
+cd "C:\BBL DEV\Python\SWT 3D Buildings"
+
+# Run the script (note the fixed --layer parameter)
+python main.py "C:\Users\DavidRasner\Downloads\SWISSBUILDINGS3D_3_0.gdb" "C:\BBL DEV\Python\SWT 3D Buildings" --limit 10000 --workers 8 --layer Building_solid

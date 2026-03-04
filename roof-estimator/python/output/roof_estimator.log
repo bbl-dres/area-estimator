@@ -1,0 +1,151 @@
+2026-01-12 19:51:15,688 - INFO - ============================================================
+2026-01-12 19:51:15,688 - INFO - ROOF ESTIMATOR FOR SWISSBUILDINGS3D
+2026-01-12 19:51:15,689 - INFO - ============================================================
+2026-01-12 19:51:15,689 - INFO - Input: C:\BBL DEV\Data\swissbuildings3d_3_0_2025_2056_5728\SWISSBUILDINGS3D_3_0.gdb
+2026-01-12 19:51:15,689 - INFO - Output: output
+2026-01-12 19:51:15,689 - INFO - Layer: Building_solid
+2026-01-12 19:51:15,689 - INFO - Chunk size: 100000
+2026-01-12 19:51:15,689 - INFO - Limit: 100 buildings
+2026-01-12 19:51:15,689 - INFO - Reading buildings from C:\BBL DEV\Data\swissbuildings3d_3_0_2025_2056_5728\SWISSBUILDINGS3D_3_0.gdb, layer: Building_solid
+2026-01-12 19:51:15,811 - ERROR - Error reading GDB: Geometry type is not supported: -2147483648
+2026-01-12 19:51:15,811 - ERROR - Processing failed: Geometry type is not supported: -2147483648
+Traceback (most recent call last):
+  File "C:\Users\DavidRasner\Documents\GitHub\OpenBuildings\workers\roof-estimator\python\main.py", line 635, in main
+    for chunk_num, chunk_data in read_gdb_buildings_chunked(
+                                 ~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        str(input_path), args.layer, args.chunk_size, args.limit
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ):
+    ^
+  File "C:\Users\DavidRasner\Documents\GitHub\OpenBuildings\workers\roof-estimator\python\main.py", line 248, in read_gdb_buildings_chunked
+    layers = list_gdb_layers(gdb_path)
+  File "C:\Users\DavidRasner\Documents\GitHub\OpenBuildings\workers\roof-estimator\python\main.py", line 144, in list_gdb_layers
+    layers_df = pyogrio.list_layers(gdb_path)
+  File "C:\Users\DavidRasner\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pyogrio\core.py", line 129, in list_layers
+    return ogr_list_layers(get_vsi_path_or_buffer(path_or_buffer))
+  File "pyogrio/_io.pyx", line 2100, in pyogrio._io.ogr_list_layers
+  File "pyogrio/_io.pyx", line 2170, in pyogrio._io.get_layer_names
+  File "pyogrio/_geometry.pyx", line 97, in pyogrio._geometry.get_geometry_type
+pyogrio.errors.GeometryError: Geometry type is not supported: -2147483648
+2026-01-12 20:10:37,173 - INFO - ============================================================
+2026-01-12 20:10:37,173 - INFO - ROOF ESTIMATOR FOR SWISSBUILDINGS3D
+2026-01-12 20:10:37,173 - INFO - ============================================================
+2026-01-12 20:10:37,173 - INFO - Input: C:\BBL DEV\Data\swissbuildings3d_3_0_2025_2056_5728\SWISSBUILDINGS3D_3_0.gdb
+2026-01-12 20:10:37,174 - INFO - Output: c:\Users\DavidRasner\Documents\GitHub\OpenBuildings\workers\roof-estimator\python\output
+2026-01-12 20:10:37,174 - INFO - Layer: Building_solid
+2026-01-12 20:10:37,174 - INFO - Chunk size: 100000
+2026-01-12 20:10:37,174 - INFO - Limit: 100 buildings
+2026-01-12 20:10:37,174 - INFO - Reading buildings from C:\BBL DEV\Data\swissbuildings3d_3_0_2025_2056_5728\SWISSBUILDINGS3D_3_0.gdb, layer: Building_solid
+2026-01-12 20:10:37,221 - INFO - Available layers: ['Floor', 'Roof', 'Wall', 'Building_solid', 'Roof_solid']
+2026-01-12 20:10:37,221 - INFO - Using layer: Building_solid
+2026-01-12 20:10:37,249 - INFO - Layer CRS: EPSG:2056
+2026-01-12 20:10:37,249 - INFO - Layer bounds: (2485683.1860000007, 1075235.5379999988, 2833435.2589999996, 1295318.9439999983)
+2026-01-12 20:10:37,249 - INFO - Schema: {'properties': {'UUID': 'str:50', 'OBJEKTART': 'str:25', 'NAME_KOMPLETT': 'str:1000', 'GEBAEUDE_NUTZUNG': 'str:1000', 'GRUND_AENDERUNG': 'str:40', 'HERKUNFT': 'str:20', 'HERKUNFT_JAHR': 'int32', 'HERKUNFT_MONAT': 'int32', 'ORIGINAL_HERKUNFT': 'str:20', 'ERSTELLUNG_JAHR': 'int32', 'ERSTELLUNG_MONAT': 'int32', 'REVISION_JAHR': 'int32', 'REVISION_MONAT': 'int32', 'DATUM_AENDERUNG': 'datetime', 'DATUM_ERSTELLUNG': 'datetime', 'DACH_MAX': 'float', 'DACH_MIN': 'float', 'GELAENDEPUNKT': 'float', 'GESAMTHOEHE': 'float', 'EGID': 'int32', 'GEBAEUDEEINHEIT': 'str:50'}, 'geometry': '3D Polygon'}
+2026-01-12 20:10:37,333 - INFO - 
+========================================
+2026-01-12 20:10:37,333 - INFO - Processing chunk 0
+2026-01-12 20:10:37,333 - INFO - ========================================
+2026-01-12 20:10:37,333 - INFO - Processing chunk 0 with 100 buildings using 5 workers
+2026-01-12 20:10:38,717 - INFO - Saved chunk 0 with 100 records to c:\Users\DavidRasner\Documents\GitHub\OpenBuildings\workers\roof-estimator\python\output\roof_analysis_20260112_201037_chunk_0000.csv
+2026-01-12 20:10:38,719 - INFO - Chunk 0 complete: 100/100 successful
+2026-01-12 20:10:38,719 - INFO - Roof shapes: {'gable': 57, 'flat': 30, 'shed': 11, 'hip': 2}
+2026-01-12 20:10:38,736 - INFO - 
+========================================
+2026-01-12 20:10:38,736 - INFO - Processing chunk 0
+2026-01-12 20:10:38,736 - INFO - ========================================
+2026-01-12 20:10:38,736 - INFO - Processing chunk 0 with 100 buildings using 5 workers
+2026-01-12 20:10:40,211 - INFO - Saved chunk 0 with 100 records to c:\Users\DavidRasner\Documents\GitHub\OpenBuildings\workers\roof-estimator\python\output\roof_analysis_20260112_201037_chunk_0000.csv
+2026-01-12 20:10:40,212 - INFO - Chunk 0 complete: 100/100 successful
+2026-01-12 20:10:40,212 - INFO - Roof shapes: {'gable': 57, 'flat': 30, 'shed': 11, 'hip': 2}
+2026-01-12 20:10:40,233 - INFO - Merging all chunks into final CSV file...
+2026-01-12 20:10:40,249 - INFO - Loaded 100 records from roof_analysis_20260112_201037_chunk_0000.csv
+2026-01-12 20:10:40,252 - INFO - Loaded 100 records from roof_analysis_20260112_201037_chunk_0000.csv
+2026-01-12 20:10:40,261 - INFO - Saved complete CSV with 200 records to c:\Users\DavidRasner\Documents\GitHub\OpenBuildings\workers\roof-estimator\python\output\roof_analysis_20260112_201037.csv
+2026-01-12 20:10:40,261 - INFO - 
+============================================================
+2026-01-12 20:10:40,261 - INFO - FINAL PROCESSING SUMMARY
+2026-01-12 20:10:40,261 - INFO - ============================================================
+2026-01-12 20:10:40,261 - INFO - Total buildings processed: 200
+2026-01-12 20:10:40,262 - INFO - Successfully analyzed: 200 (100.0%)
+2026-01-12 20:10:40,262 - INFO - 
+Roof Shape Distribution:
+2026-01-12 20:10:40,262 - INFO -   gable: 114 (57.0%)
+2026-01-12 20:10:40,262 - INFO -   flat: 60 (30.0%)
+2026-01-12 20:10:40,262 - INFO -   shed: 22 (11.0%)
+2026-01-12 20:10:40,262 - INFO -   hip: 4 (2.0%)
+2026-01-12 20:10:40,263 - INFO - 
+Roof Area Statistics:
+2026-01-12 20:10:40,263 - INFO -   Mean: 182.6 m²
+2026-01-12 20:10:40,264 - INFO -   Median: 69.7 m²
+2026-01-12 20:10:40,264 - INFO -   Total: 36,523 m²
+2026-01-12 20:10:40,265 - INFO - 
+Wall Area Statistics:
+2026-01-12 20:10:40,265 - INFO -   Mean: 376.2 m²
+2026-01-12 20:10:40,265 - INFO -   Total: 75,240 m²
+2026-01-12 20:10:40,266 - INFO - 
+Footprint Area Statistics:
+2026-01-12 20:10:40,266 - INFO -   Mean: 165.0 m²
+2026-01-12 20:10:40,266 - INFO -   Total: 32,996 m²
+2026-01-12 20:10:40,266 - INFO - 
+Cleaning up chunk files...
+2026-01-12 20:10:40,267 - WARNING - Could not delete roof_analysis_20260112_201037_chunk_0000.csv: [WinError 2] The system cannot find the file specified: 'c:\\Users\\DavidRasner\\Documents\\GitHub\\OpenBuildings\\workers\\roof-estimator\\python\\output\\roof_analysis_20260112_201037_chunk_0000.csv'
+2026-01-12 20:10:40,267 - INFO - 
+============================================================
+2026-01-12 20:10:40,267 - INFO - Processing completed in 3.1 seconds (0.1 minutes)
+2026-01-12 20:10:40,267 - INFO - ============================================================
+2026-01-12 20:12:38,089 - INFO - ============================================================
+2026-01-12 20:12:38,089 - INFO - ROOF ESTIMATOR FOR SWISSBUILDINGS3D
+2026-01-12 20:12:38,089 - INFO - ============================================================
+2026-01-12 20:12:38,089 - INFO - Input: C:\BBL DEV\Data\swissbuildings3d_3_0_2025_2056_5728\SWISSBUILDINGS3D_3_0.gdb
+2026-01-12 20:12:38,090 - INFO - Output: c:\Users\DavidRasner\Documents\GitHub\OpenBuildings\workers\roof-estimator\python\output
+2026-01-12 20:12:38,090 - INFO - Layer: Building_solid
+2026-01-12 20:12:38,090 - INFO - Chunk size: 100000
+2026-01-12 20:12:38,090 - INFO - Limit: 100 buildings
+2026-01-12 20:12:38,090 - INFO - Reading buildings from C:\BBL DEV\Data\swissbuildings3d_3_0_2025_2056_5728\SWISSBUILDINGS3D_3_0.gdb, layer: Building_solid
+2026-01-12 20:12:38,126 - INFO - Available layers: ['Floor', 'Roof', 'Wall', 'Building_solid', 'Roof_solid']
+2026-01-12 20:12:38,126 - INFO - Using layer: Building_solid
+2026-01-12 20:12:38,159 - INFO - Layer CRS: EPSG:2056
+2026-01-12 20:12:38,159 - INFO - Layer bounds: (2485683.1860000007, 1075235.5379999988, 2833435.2589999996, 1295318.9439999983)
+2026-01-12 20:12:38,159 - INFO - Schema: {'properties': {'UUID': 'str:50', 'OBJEKTART': 'str:25', 'NAME_KOMPLETT': 'str:1000', 'GEBAEUDE_NUTZUNG': 'str:1000', 'GRUND_AENDERUNG': 'str:40', 'HERKUNFT': 'str:20', 'HERKUNFT_JAHR': 'int32', 'HERKUNFT_MONAT': 'int32', 'ORIGINAL_HERKUNFT': 'str:20', 'ERSTELLUNG_JAHR': 'int32', 'ERSTELLUNG_MONAT': 'int32', 'REVISION_JAHR': 'int32', 'REVISION_MONAT': 'int32', 'DATUM_AENDERUNG': 'datetime', 'DATUM_ERSTELLUNG': 'datetime', 'DACH_MAX': 'float', 'DACH_MIN': 'float', 'GELAENDEPUNKT': 'float', 'GESAMTHOEHE': 'float', 'EGID': 'int32', 'GEBAEUDEEINHEIT': 'str:50'}, 'geometry': '3D Polygon'}
+2026-01-12 20:12:38,230 - INFO - 
+========================================
+2026-01-12 20:12:38,230 - INFO - Processing chunk 0
+2026-01-12 20:12:38,230 - INFO - ========================================
+2026-01-12 20:12:38,231 - INFO - Processing chunk 0 with 100 buildings using 5 workers
+2026-01-12 20:12:39,444 - INFO - Saved chunk 0 with 100 records to c:\Users\DavidRasner\Documents\GitHub\OpenBuildings\workers\roof-estimator\python\output\roof_analysis_20260112_201238_chunk_0000.csv
+2026-01-12 20:12:39,445 - INFO - Chunk 0 complete: 100/100 successful
+2026-01-12 20:12:39,445 - INFO - Roof shapes: {'gable': 57, 'flat': 30, 'shed': 11, 'hip': 2}
+2026-01-12 20:12:39,463 - INFO - Merging all chunks into final CSV file...
+2026-01-12 20:12:39,476 - INFO - Loaded 100 records from roof_analysis_20260112_201238_chunk_0000.csv
+2026-01-12 20:12:39,480 - INFO - Saved complete CSV with 100 records to c:\Users\DavidRasner\Documents\GitHub\OpenBuildings\workers\roof-estimator\python\output\roof_analysis_20260112_201238.csv
+2026-01-12 20:12:39,480 - INFO - 
+============================================================
+2026-01-12 20:12:39,480 - INFO - FINAL PROCESSING SUMMARY
+2026-01-12 20:12:39,480 - INFO - ============================================================
+2026-01-12 20:12:39,480 - INFO - Total buildings processed: 100
+2026-01-12 20:12:39,480 - INFO - Successfully analyzed: 100 (100.0%)
+2026-01-12 20:12:39,481 - INFO - 
+Roof Shape Distribution:
+2026-01-12 20:12:39,481 - INFO -   gable: 57 (57.0%)
+2026-01-12 20:12:39,481 - INFO -   flat: 30 (30.0%)
+2026-01-12 20:12:39,481 - INFO -   shed: 11 (11.0%)
+2026-01-12 20:12:39,481 - INFO -   hip: 2 (2.0%)
+2026-01-12 20:12:39,481 - INFO - 
+Roof Area Statistics:
+2026-01-12 20:12:39,482 - INFO -   Mean: 182.6 m²
+2026-01-12 20:12:39,482 - INFO -   Median: 69.7 m²
+2026-01-12 20:12:39,482 - INFO -   Total: 18,261 m²
+2026-01-12 20:12:39,482 - INFO - 
+Wall Area Statistics:
+2026-01-12 20:12:39,482 - INFO -   Mean: 376.2 m²
+2026-01-12 20:12:39,483 - INFO -   Total: 37,620 m²
+2026-01-12 20:12:39,483 - INFO - 
+Footprint Area Statistics:
+2026-01-12 20:12:39,483 - INFO -   Mean: 165.0 m²
+2026-01-12 20:12:39,483 - INFO -   Total: 16,498 m²
+2026-01-12 20:12:39,483 - INFO - 
+Cleaning up chunk files...
+2026-01-12 20:12:39,483 - INFO - 
+============================================================
+2026-01-12 20:12:39,484 - INFO - Processing completed in 1.4 seconds (0.0 minutes)
+2026-01-12 20:12:39,484 - INFO - ============================================================
