@@ -159,7 +159,7 @@ Input columns are preserved in the output with `input_` prefix: `input_id`, `inp
 | `fid` | integer | MUST | AV | Feature ID from GeoPackage; defaults to row index |
 | `area_footprint_m2` | float | MUST | Computed | Footprint area from polygon geometry (m²) |
 | `area_official_m2` | float | OPTIONAL | AV | Official area from source attribute (m²) |
-| `status` | string | MUST | Computed | `ok` / `no_building_at_point` |
+| `status_step1` | string | MUST | Computed | `ok` / `no_building_at_point` |
 
 ### Step 2 — Grid
 
@@ -182,7 +182,7 @@ Samples DTM and DSM elevations at each grid point to compute above-ground volume
 | `height_max_m` | float | MUST | DTM + DSM | Max building height above base — ridge (m) |
 | `height_minimal_m` | float | MUST | Computed | `volume / footprint_area` — equivalent uniform box height (m) |
 | `grid_points_count` | integer | MUST | Computed | Number of valid elevation sample points |
-| `status` | string | MUST | Computed | `success` / `no_grid_points` / `no_height_data` / `error` |
+| `status_step3` | string | MUST | Computed | `success` / `skipped` / `no_grid_points` / `no_height_data` / `error` |
 
 ### Step 4 — Floor Areas _(optional, `--estimate-area`)_
 
@@ -199,6 +199,7 @@ Estimates gross floor area from GWR building classification and `height_minimal_
 | `area_floor_total_m2` | float | OPTIONAL | Computed | Gross floor area — `footprint × floors` (m²) |
 | `area_accuracy` | string | OPTIONAL | Computed | `high` (±10–15%) / `medium` (±15–25%) / `low` (±25–40%) |
 | `building_type` | string | OPTIONAL | Lookup | Building type description from floor height lookup (e.g. `Single-family house`) |
+| `status_step4` | string | OPTIONAL | Computed | `success` / `skipped` / `no_volume` / `height_exceeds_200m` |
 
 ---
 

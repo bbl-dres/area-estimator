@@ -259,10 +259,12 @@ def main():
 
         area_results = []
         for _, row in results_df.iterrows():
-            if row['status'] == 'success':
+            if row['status_step3'] == 'success':
                 area_results.append(estimate_floor_area(row.to_dict()))
             else:
-                area_results.append(row.to_dict())
+                result = row.to_dict()
+                result['status_step4'] = 'skipped'
+                area_results.append(result)
 
         results_df = pd.DataFrame(area_results)
 
@@ -284,7 +286,7 @@ def main():
     log.info("SUMMARY")
     log.info("=" * 50)
 
-    successful = results_df[results_df['status'] == 'success']
+    successful = results_df[results_df['status_step3'] == 'success']
     log.info(f"Successful: {len(successful)}/{len(results_df)}")
 
     if len(successful) > 0:
