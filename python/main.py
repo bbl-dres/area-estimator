@@ -109,10 +109,13 @@ def main():
 
     args = parser.parse_args()
 
-    # Default output path with timestamp
+    # Add timestamp to output filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     if not args.output:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         args.output = str(Path("data/output") / f"result_{timestamp}.csv")
+    else:
+        p = Path(args.output)
+        args.output = str(p.parent / f"{p.stem}_{timestamp}{p.suffix}")
 
     # ── Logging ────────────────────────────────────────────────────────────
     log_file = setup_logging(args.output)
@@ -303,8 +306,8 @@ def main():
                 log.info(f"  Average: {area_data['area_floor_total_m2'].mean():,.0f} m²")
                 log.info(f"  Avg floors: {area_data['floors_estimated'].mean():.1f}")
 
-    log.info("\nStatus:")
-    for status, count in results_df['status'].value_counts().items():
+    log.info("\nStatus (Step 3):")
+    for status, count in results_df['status_step3'].value_counts().items():
         log.info(f"  {status}: {count}")
 
     return 0

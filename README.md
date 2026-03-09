@@ -192,6 +192,19 @@ Estimates gross floor area from GWR building classification and `height_minimal_
 | Industrial / special | Wide floor height ranges (4–7 m) reduce accuracy |
 | Data currency | Elevation model year may not match building construction date |
 | Roof base estimation | `elevation_roof_base_m` may capture ground features (overhangs, passages) instead of true eave |
+| Tree canopy over roofs | LIDAR surface model does not differentiate between roofs and foliage — tall trees covering small buildings produce false positive heights and inflated volumes |
+
+---
+
+## Future Development
+
+| Feature | Description |
+|---------|-------------|
+| Watertight 3D mesh | Generate closed building geometry from elevation data. swisstopo provides an official 3D buildings dataset (swissBUILDINGS3D), but quality varies significantly between buildings. |
+| Roof geometry estimation | Classify roof shapes (flat, gable, hip, etc.) and estimate roof surface areas from 3D mesh or elevation profiles. |
+| Outer wall quantities | Estimate exterior wall areas from building footprint perimeter and height metrics. |
+| Material classification | Investigate building material detection from imagery or other data sources — expected to be challenging. |
+| International buildings | Extend support beyond Switzerland. The Swiss federal real estate portfolio includes buildings worldwide, requiring alternative elevation and cadastral data sources. |
 
 ---
 

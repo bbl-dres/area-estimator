@@ -26,7 +26,16 @@
       "Bash(python python/main.py --geojson \"data/BBL Adressen Bereinigt.geojson\" --av \"D:/AV_lv95/av_2056.gpkg\" --alti3d \"D:/SwissAlti3D\" --surface3d \"D:/swissSURFACE3D Raster\" --auto-fetch)",
       "Bash(python3 -c \"from pathlib import Path; p = Path\\(''D:/SwissAlti3D''\\); print\\(list\\(p.glob\\(''*_2556-1114_*.tif''\\)\\)\\)\")",
       "Bash(python3 -c \":*)",
-      "Bash(python python/main.py --geojson \"data/BBL Adressen Bereinigt.geojson\" --av \"D:/AV_lv95/av_2056.gpkg\" --alti3d \"D:/SwissAlti3D\" --surface3d \"D:/swissSURFACE3D Raster\")"
+      "Bash(python python/main.py --geojson \"data/BBL Adressen Bereinigt.geojson\" --av \"D:/AV_lv95/av_2056.gpkg\" --alti3d \"D:/SwissAlti3D\" --surface3d \"D:/swissSURFACE3D Raster\")",
+      "Bash(python python/main.py --coordinates data/buildings.csv --alti3d data/swissalti3d_lv95 --surface3d data/swisssurface3d_lv95 --auto-fetch --estimate-area --gwr-csv data/gwr/gebaeude_batiment_edificio.csv -o data/output/results.csv)",
+      "Bash(ls /c/Users/DavidRasner/Documents/GitHub/area-estimator/data/swissalti3d_lv95/*.tif)",
+      "Bash(ls /c/Users/DavidRasner/Documents/GitHub/area-estimator/data/swisssurface3d_lv95/*.tif)",
+      "Bash(pkill -f \"python python/main.py\")",
+      "Bash(ls -lt /c/Users/DavidRasner/Documents/GitHub/area-estimator/data/output/*.csv)",
+      "Bash(ls \"/d/swissSURFACE3D Raster\"/*.tif)",
+      "Bash(python python/main.py --coordinates data/buildings.csv --alti3d \"D:/SwissAlti3D\" --surface3d \"D:/swissSURFACE3D Raster\" --estimate-area --gwr-csv data/gwr/gebaeude_batiment_edificio.csv -o data/output/results.csv)",
+      "Bash(python python/main.py --coordinates data/buildings.csv --alti3d \"D:/SwissAlti3D\" --surface3d \"D:/swissSURFACE3D Raster\" -o data/output/results.csv)",
+      "Bash(python python/main.py --coordinates data/buildings.csv --alti3d \"D:/SwissAlti3D\" --surface3d \"D:/swissSURFACE3D Raster\" --auto-fetch -o data/output/results.csv)"
     ]
   }
 }
