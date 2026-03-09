@@ -172,49 +172,105 @@ python python/main.py --coordinates my_buildings.csv \
 
 ---
 
-## Input Data
+## Inputs
 
-| Dataset | Status | Description | Source |
-|---------|:------:|-------------|--------|
-| **Building footprints** | MUST | Geodata file (`.gpkg`, `.shp`, `.geojson`) or CSV with coordinates | [geodienste.ch/services/av](https://www.geodienste.ch/services/av) |
-| **Amtliche Vermessung** | MUST (with `--geojson`) | AV GeoPackage for spatial footprint lookup | [geodienste.ch/services/av](https://www.geodienste.ch/services/av) |
-| **swissALTI3D** | MUST | Terrain elevation (DTM), 0.5m GeoTIFF tiles | [swisstopo](https://www.swisstopo.admin.ch/de/hoehenmodell-swissalti3d) |
-| **swissSURFACE3D Raster** | MUST | Surface elevation (DSM), 0.5m GeoTIFF tiles | [swisstopo](https://www.swisstopo.admin.ch/de/hoehenmodell-swisssurface3d-raster) |
-| **GWR classification** | OPTIONAL | Building category/class for floor area estimation (Step 4) | [housing-stat.ch](https://www.housing-stat.ch/de/data/supply/public.html) |
+| Dataset | Status | Used in | Description | Source |
+|---------|:------:|:-------:|-------------|--------|
+| **Building footprints** | MUST | Step 1 | Building polygons — `.gpkg`, `.shp`, `.geojson`, or CSV with coordinates | [geodienste.ch](https://www.geodienste.ch/services/av) |
+| **Amtliche Vermessung** | MUST (with `--geojson`) | Step 1 | AV GeoPackage — spatial footprint lookup via point-in-polygon | [geodienste.ch](https://www.geodienste.ch/services/av) |
+| **swissALTI3D** | MUST | Step 3 | Terrain elevation (DTM), 0.5m resolution, 1 km² GeoTIFF tiles | [swisstopo](https://www.swisstopo.admin.ch/de/hoehenmodell-swissalti3d) |
+| **swissSURFACE3D Raster** | MUST | Step 3 | Surface elevation (DSM), 0.5m resolution, 1 km² GeoTIFF tiles | [swisstopo](https://www.swisstopo.admin.ch/de/hoehenmodell-swisssurface3d-raster) |
+| **GWR classification** | OPTIONAL | Step 4 | Building category/class for floor height lookup, via EGID | [housing-stat.ch](https://www.housing-stat.ch/de/data/supply/public.html) |
 
-### Building Footprints
+### Building footprints (Step 1)
 
-Three input modes are supported:
+Three input modes:
 
 | Input mode | Flag | Accepts | Matching |
 |------------|------|---------|----------|
-| Geodata file | `--footprints` | `.gpkg`, `.shp`, `.geojson` — auto-filters to buildings if type column present | Direct polygons from file |
-| Coordinates | `--coordinates` | CSV with `lon`, `lat` (optionally `egid`, `fid`) — each point is buffered into a 10×10 m polygon | No AV lookup |
+| Geodata file | `--footprints` | `.gpkg`, `.shp`, `.geojson` — auto-filters to `Art = Gebaeude` | Direct polygons from file |
+| Coordinates | `--coordinates` | CSV with `lon`, `lat` (optionally `egid`, `fid`) — buffered to 10×10 m | No AV lookup |
 | GeoJSON + AV | `--geojson` + `--av` | GeoJSON with Point geometries (WGS84) | **Spatial containment** — point must fall inside an AV building polygon |
 
-For `--geojson` mode, matching is purely spatial: the input WGS84 point is transformed to LV95 and tested against AV building polygons (`Art = Gebaeude`). If the point falls inside a polygon, the building footprint and its `GWR_EGID` are used. If not, the feature gets status `no_building_at_point`. There is no fuzzy or nearest-neighbor matching.
+For `--geojson` mode, matching is purely spatial: the WGS84 point is transformed to LV95 and tested against AV building polygons. If the point falls inside a polygon, the footprint and its `GWR_EGID` are used. If not, the feature gets status `no_building_at_point`. There is no fuzzy or nearest-neighbor matching.
 
-### Elevation Models
+### Elevation tiles (Step 3)
 
-| Dataset | Type | Measures | Resolution | Tiles | Format |
-|---------|------|----------|:----------:|:-----:|--------|
-| **swissALTI3D** | DTM (terrain) | Bare earth elevation | 0.5 m | 1 km² | Cloud-Optimized GeoTIFF |
-| **swissSURFACE3D Raster** | DSM (surface) | Top of buildings, vegetation | 0.5 m | 1 km² | Cloud-Optimized GeoTIFF |
+| Dataset | Type | Measures | Resolution | Format |
+|---------|------|----------|:----------:|--------|
+| **swissALTI3D** | DTM | Bare earth elevation | 0.5 m | Cloud-Optimized GeoTIFF |
+| **swissSURFACE3D Raster** | DSM | Top of buildings, vegetation | 0.5 m | Cloud-Optimized GeoTIFF |
 
-Tile naming: `swissalti3d_YYYY_XXXX-YYYY_0.5_2056_5728.tif` — tile ID `XXXX-YYYY` = SW corner in LV95 ÷ 1000.
+Tile naming: `swissalti3d_YYYY_XXXX-YYYY_0.5_2056_5728.tif` — tile ID = SW corner in LV95 ÷ 1000. With `--auto-fetch`, missing tiles are downloaded from swisstopo on demand.
 
-With `--auto-fetch`, the pipeline downloads only the tiles it needs from swisstopo on demand.
-
-### GWR Classification (optional)
-
-Required only for Step 4 (`--estimate-area`). Links to buildings via EGID.
+### GWR classification (Step 4, optional)
 
 | Property | Value |
 |----------|-------|
 | Source | [housing-stat.ch](https://www.housing-stat.ch/de/index.html) |
 | Catalog | [GWR v4.3](https://www.housing-stat.ch/catalog/en/4.3/final) |
 | Key fields | `GKAT` (category), `GKLAS` (class), `GBAUJ` (year), `GASTW` (stories) |
-| Access | CSV bulk download from [housing-stat.ch/data](https://www.housing-stat.ch/de/data/supply/public.html) or swisstopo API per EGID |
+| Access | CSV bulk from [housing-stat.ch/data](https://www.housing-stat.ch/de/data/supply/public.html) or swisstopo API per EGID |
+
+---
+
+## Outputs
+
+All results are written to a single CSV file (`result_<timestamp>.csv`).
+
+### Step 1 — Identifiers & Metadata
+
+Carried through from input and AV spatial matching.
+
+| Column | Status | Source | Description |
+|--------|:------:|--------|-------------|
+| `input_id` | MUST | Input | User-provided identifier (e.g. `bbl_id` from GeoJSON) |
+| `input_egid` | OPTIONAL | Input | EGID from input data (reference only, not used for matching) |
+| `input_lon` | MUST | Input | Original WGS84 longitude |
+| `input_lat` | MUST | Input | Original WGS84 latitude |
+| `egid` | MUST | AV | Authoritative federal building ID (`GWR_EGID` from AV) |
+| `fid` | MUST | AV | GeoPackage feature ID — direct link to AV polygon |
+| `area_footprint_m2` | MUST | Geometry | Footprint area computed from polygon (m²) |
+| `area_official_m2` | OPTIONAL | AV | Official area attribute from source data (m²) |
+
+### Step 3 — Volume & Heights
+
+Computed from DTM + DSM elevation sampling on the 1×1m grid.
+
+| Column | Status | Source | Description |
+|--------|:------:|--------|-------------|
+| `volume_above_ground_m3` | MUST | DTM + DSM | Above-ground building volume (m³) |
+| `elevation_base_m` | MUST | DTM | Lowest terrain elevation under footprint (m asl) — reference plane for all heights |
+| `elevation_roof_base_m` | MUST | DSM | Lowest surface elevation in footprint — estimated eave (m asl) |
+| `height_mean_m` | MUST | DTM + DSM | Mean building height above base (m) |
+| `height_max_m` | MUST | DTM + DSM | Max building height above base — ridge (m) |
+| `height_minimal_m` | MUST | Derived | volume / footprint area — equivalent uniform box height (m) |
+| `grid_points_count` | MUST | — | Number of valid elevation sample points |
+| `status` | MUST | — | `success` / `no_building_at_point` / `no_grid_points` / `no_height_data` / `error` |
+
+### Step 4 — Floor Areas (optional, `--estimate-area`)
+
+Added when Step 4 is enabled. Based on GWR building classification.
+
+| Column | Status | Source | Description |
+|--------|:------:|--------|-------------|
+| `gkat` | OPTIONAL | GWR | Building category code (1010–1080) |
+| `gklas` | OPTIONAL | GWR | Building class code (1110–1274) |
+| `gbauj` | OPTIONAL | GWR | Construction year |
+| `gastw` | OPTIONAL | GWR | Number of stories (GWR value) |
+| `area_floor_total_m2` | MUST | Derived | Gross floor area (m²) |
+| `floors_estimated` | MUST | Derived | Estimated floor count |
+| `floor_height_used_m` | MUST | Derived | Floor height applied (m) |
+| `building_type` | OPTIONAL | GWR | Building type description |
+| `area_accuracy` | MUST | Derived | `high` / `medium` / `low` |
+
+### Accuracy levels
+
+| Level | Uncertainty | Building types |
+|:-----:|:-----------:|----------------|
+| **high** | ±10–15% | Residential (GKAT 1020, GKLAS 11xx) |
+| **medium** | ±15–25% | Commercial, office, schools, hospitals |
+| **low** | ±25–40% | Industrial, special use, missing classification |
 
 ---
 
@@ -222,14 +278,7 @@ Required only for Step 4 (`--estimate-area`). Links to buildings via EGID.
 
 ### Step 1 — Read Building Footprints
 
-Loads building polygons and resolves identifiers. For `--geojson` mode, input coordinates are spatially matched to AV building polygons (point-in-polygon containment).
-
-Each building carries:
-- **input_id** / **input_egid** / **input_lon** / **input_lat** — preserved from input for traceability
-- **egid** — authoritative EGID from the AV (`GWR_EGID`), used for GWR lookups
-- **area_footprint_m2** — always computed from `polygon.area` for consistency
-
-All geometries are transformed to LV95 (EPSG:2056).
+Loads building polygons and resolves identifiers. For `--geojson` mode, input coordinates are spatially matched to AV building polygons (point-in-polygon containment). All geometries are transformed to LV95 (EPSG:2056).
 
 ### Step 2 — Aligned 1×1m Grid
 
@@ -246,12 +295,7 @@ Why oriented grids? A 45°-rotated building gets poor coverage from an axis-alig
 
 ### Step 3 — Volume & Height Metrics
 
-Samples two elevation values at each grid point:
-
-| Value | Source | Meaning |
-|-------|--------|---------|
-| Terrain | swissALTI3D (DTM) | Ground elevation |
-| Surface | swissSURFACE3D (DSM) | Top of building |
+Samples terrain (DTM) and surface (DSM) elevations at each grid point.
 
 **Volume calculation:**
 
@@ -261,17 +305,7 @@ building_height  = max(surface − elevation_base_m, 0)  # per grid point, clamp
 volume           = Σ(building_heights) × 1m²
 ```
 
-`elevation_base_m` is the single lowest DTM value sampled across all 1×1m grid points within the footprint. It serves as the reference plane: all building heights are measured from this point upward. This means a building on a slope will have its volume measured from the lowest corner of the foundation, which is conservative (slightly overestimates on steep terrain).
-
-**Derived metrics:**
-
-| Metric | Formula | Meaning |
-|--------|---------|---------|
-| `elevation_base_m` | min(terrain) | Lowest ground elevation under footprint (m asl) |
-| `elevation_roof_base_m` | min(surface) | Lowest surface elevation in footprint — estimated eave (m asl) |
-| `height_mean_m` | mean(surface − base) | Average building height above base (m) |
-| `height_max_m` | max(surface − base) | Maximum building height — ridge (m) |
-| `height_minimal_m` | volume / footprint area | Equivalent uniform box height (m) — best for floor estimation on complex shapes |
+`elevation_base_m` is the single lowest DTM value across all grid points within the footprint. It serves as the reference plane: all building heights are measured from this point upward. A building on a slope will have its volume measured from the lowest corner of the foundation, which is conservative (slightly overestimates on steep terrain).
 
 ### Step 4 — Floor Area Estimation (optional)
 
@@ -290,53 +324,6 @@ flowchart LR
 Uses `height_minimal_m` (volume / footprint) rather than `height_mean_m` — it represents the equivalent uniform box height, smoothing out complex roof shapes and dormers.
 
 **Lookup priority:** GKLAS (specific class) → GKAT (broad category) → default 2.70–3.30 m.
-
----
-
-## Output CSV
-
-### Always included (Steps 1–3)
-
-| Column | Status | Source | Description |
-|--------|:------:|--------|-------------|
-| `input_id` | MUST | Input | User-provided identifier (e.g. `bbl_id` from GeoJSON) |
-| `input_egid` | OPTIONAL | Input | EGID from input data (reference only, not used for matching) |
-| `input_lon` | MUST | Input | Original WGS84 longitude |
-| `input_lat` | MUST | Input | Original WGS84 latitude |
-| `egid` | MUST | AV | Authoritative federal building ID from AV (`GWR_EGID`) |
-| `fid` | OPTIONAL | AV | Cadastral survey feature ID |
-| `area_footprint_m2` | MUST | Geometry | Footprint area computed from polygon (m²) |
-| `area_official_m2` | OPTIONAL | AV | Official area attribute from source data (m²) |
-| `volume_above_ground_m3` | MUST | DTM + DSM | Above-ground volume (m³) |
-| `elevation_base_m` | MUST | DTM | Lowest terrain elevation under footprint (m asl). Used as reference plane for all height calculations. |
-| `elevation_roof_base_m` | MUST | DSM | Lowest surface elevation within footprint — estimated eave height (m asl) |
-| `height_mean_m` | MUST | DTM + DSM | Mean building height above base (m) |
-| `height_max_m` | MUST | DTM + DSM | Maximum building height above base (m) — ridge |
-| `height_minimal_m` | MUST | Derived | volume / footprint area (m) — equivalent uniform box height |
-| `grid_points_count` | MUST | — | Number of valid elevation sample points |
-| `status` | MUST | — | `success` / `no_building_at_point` / `no_grid_points` / `no_height_data` / `error` |
-
-### With `--estimate-area` (Step 4)
-
-| Column | Status | Source | Description |
-|--------|:------:|--------|-------------|
-| `gkat` | OPTIONAL | GWR | Building category code |
-| `gklas` | OPTIONAL | GWR | Building class code |
-| `gbauj` | OPTIONAL | GWR | Construction year |
-| `gastw` | OPTIONAL | GWR | Number of stories (GWR value) |
-| `area_floor_total_m2` | MUST | Derived | Gross floor area (m²) |
-| `floors_estimated` | MUST | Derived | Estimated floor count |
-| `floor_height_used_m` | MUST | Derived | Floor height applied (m) |
-| `building_type` | OPTIONAL | GWR | Building type description |
-| `area_accuracy` | MUST | Derived | `high` / `medium` / `low` |
-
-### Accuracy levels
-
-| Level | Uncertainty | Building types |
-|:-----:|:-----------:|----------------|
-| **high** | ±10–15% | Residential (GKAT 1020, GKLAS 11xx) |
-| **medium** | ±15–25% | Commercial, office, schools, hospitals |
-| **low** | ±25–40% | Industrial, special use, missing classification |
 
 ---
 
