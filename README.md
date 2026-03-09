@@ -1,5 +1,10 @@
 # Swiss Building Volume & Area Estimator
 
+![Python](https://img.shields.io/badge/python-3.10+-blue?logo=python&logoColor=white)
+![License](https://img.shields.io/badge/license-MIT-green)
+![swisstopo](https://img.shields.io/badge/data-swisstopo-red)
+![CRS](https://img.shields.io/badge/CRS-LV95%20EPSG%3A2056-orange)
+
 Estimates building volumes and gross floor areas using publicly available Swiss elevation models and cadastral data.
 
 <p align="center">
@@ -9,21 +14,6 @@ Estimates building volumes and gross floor areas using publicly available Swiss 
 <p align="center">
   <img src="images/Preview_4.jpg" width="70%" />
 </p>
-
-## Table of Contents
-
-- [Model Overview](#model-overview)
-- [Quick Start](#quick-start)
-- [Command-Line Reference](#command-line-reference)
-- [Input Data](#input-data)
-- [Pipeline Details](#pipeline-details)
-- [Output CSV](#output-csv)
-- [Floor Height Reference](#floor-height-reference)
-- [Limitations](#limitations)
-- [Project Structure](#project-structure)
-- [References](#references)
-
----
 
 ## Model Overview
 
@@ -237,13 +227,15 @@ Returns: `egid`, `gkat`, `gklas`, `gbauj`, `gastw`, `garea`, `ganzwhg`, `egrid`.
 Loads building polygons from a geodata file or CSV coordinates. Each building carries:
 - **EGID** — links to GWR attributes
 - **FID** — cadastral survey feature ID
+- **area_official_m2** — official area from source (if present), kept for reference
+- **area_footprint_m2** — always computed from `polygon.area` for consistency
 
 All geometries are transformed to LV95 (EPSG:2056).
 
 | Input mode | Flag | Accepts |
 |------------|------|---------|
 | Geodata file | `--footprints` | `.gpkg`, `.shp`, `.geojson` — auto-filters to buildings if type column present |
-| Coordinates | `--coordinates` | CSV with `lon`, `lat` (optionally `egid`, `fid`) |
+| Coordinates | `--coordinates` | CSV with `lon`, `lat` (optionally `egid`, `fid`) — each point is buffered into a 10×10 m polygon for elevation sampling |
 
 ### Step 2 — Aligned 1×1m Grid
 
@@ -313,7 +305,8 @@ Uses `height_minimal_m` (volume / footprint) rather than `height_mean_m` — it 
 |--------|--------|-------------|
 | `egid` | AV | Federal building identifier |
 | `fid` | AV | Cadastral survey feature ID |
-| `area_footprint_m2` | AV | Footprint area (m²) |
+| `area_footprint_m2` | Geometry | Footprint area computed from polygon (m²) |
+| `area_official_m2` | AV | Official area attribute from source data (m², if available) |
 | `volume_above_ground_m3` | DTM + DSM | Above-ground volume (m³) |
 | `elevation_base_m` | DTM | Min terrain elevation (m, LV95) |
 | `elevation_roof_base_m` | DSM | Min surface elevation — est. eave (m, LV95) |
@@ -332,9 +325,9 @@ Uses `height_minimal_m` (volume / footprint) rather than `height_mean_m` — it 
 | `gbauj` | GWR | Construction year |
 | `gastw` | GWR | Number of stories (GWR value) |
 | `area_floor_total_m2` | Derived | Gross floor area (m²) |
-| `area_floor_above_ground_m2` | Derived | Above-ground floor area (m²) |
-| `floors_total` | Derived | Estimated floor count |
-| `floors_above` | Derived | Above-ground floors |
+| `floors_estimated` | Derived | Estimated floor count |
+| `floor_height_used_m` | Derived | Floor height applied (m) |
+| `building_type` | GWR | Building type description |
 | `area_accuracy` | Derived | `high` / `medium` / `low` |
 
 ### Accuracy levels

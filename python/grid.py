@@ -10,6 +10,7 @@ rotated rectangle) to maximize coverage for non-axis-aligned buildings.
 import numpy as np
 from shapely.geometry import Point
 from shapely.affinity import rotate
+from shapely.prepared import prep
 
 
 def get_building_orientation(polygon):
@@ -72,21 +73,26 @@ def create_aligned_grid_points(polygon, voxel_size=1.0):
     x_coords = np.arange(x_min + voxel_size / 2, x_max, voxel_size)
     y_coords = np.arange(y_min + voxel_size / 2, y_max, voxel_size)
 
-    # Filter points inside the rotated polygon
-    rotated_points = []
-    for x in x_coords:
-        for y in y_coords:
-            point = Point(x, y)
-            if rotated_polygon.contains(point) or rotated_polygon.touches(point):
-                rotated_points.append(point)
+    # Filter points inside the rotated polygon using prepared geometry
+    prepared_polygon = prep(rotated_polygon)
+    xx, yy = np.meshgrid(x_coords, y_coords)
+    candidates = [Point(x, y) for x, y in zip(xx.ravel(), yy.ravel())]
+    rotated_points = list(filter(prepared_polygon.contains, candidates))
 
     if len(rotated_points) == 0:
         return []
 
     # Rotate points back to original orientation
+    cx, cy = rotated_polygon.centroid.x, rotated_polygon.centroid.y
+    angle_rad = np.radians(rotation_angle)
+    cos_a, sin_a = np.cos(angle_rad), np.sin(angle_rad)
+
     original_points = []
     for point in rotated_points:
-        rotated_back = rotate(point, rotation_angle, origin=rotated_polygon.centroid)
-        original_points.append((rotated_back.x, rotated_back.y))
+        dx, dy = point.x - cx, point.y - cy
+        original_points.append((
+            cx + dx * cos_a - dy * sin_a,
+            cy + dx * sin_a + dy * cos_a,
+        ))
 
     return original_points

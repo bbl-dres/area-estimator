@@ -98,12 +98,13 @@ def main():
     results = []
     total = len(buildings)
     for i, (_, row) in enumerate(buildings.iterrows()):
-        print(f"Processing building {i + 1}/{total}", end='\r')
+        print(f"Processing building {i + 1}/{total}", end='\r', flush=True)
         result = calculate_building_volume(
             polygon=row.geometry,
             tile_index=tile_index,
             egid=row.get('egid'),
             fid=row.get('fid'),
+            area_official_m2=row.get('area_official_m2'),
         )
         results.append(result)
 
@@ -153,7 +154,7 @@ def main():
                 print(f"\nFloor Area:")
                 print(f"  Total:   {area_data['area_floor_total_m2'].sum():,.0f} m²")
                 print(f"  Average: {area_data['area_floor_total_m2'].mean():,.0f} m²")
-                print(f"  Avg floors: {area_data['floors_total'].mean():.1f}")
+                print(f"  Avg floors: {area_data['floors_estimated'].mean():.1f}")
 
                 print(f"\nAccuracy:")
                 for acc, count in area_data['area_accuracy'].value_counts().items():

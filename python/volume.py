@@ -21,6 +21,9 @@ import rasterio
 
 from grid import create_aligned_grid_points
 
+# LRU-style tile cache limit (each open tile = one file handle)
+MAX_CACHED_TILES = 50
+
 
 class TileIndex:
     """Indexes and caches swisstopo GeoTIFF elevation tiles."""
@@ -29,6 +32,7 @@ class TileIndex:
         self.alti3d_dir = Path(alti3d_dir)
         self.surface3d_dir = Path(surface3d_dir)
         self.tile_cache = {}
+        self._cache_order = []
 
         print("Indexing available tiles...")
         self.alti3d_tiles = self._index_tiles(self.alti3d_dir)
@@ -45,6 +49,7 @@ class TileIndex:
         - swisssurface3d-raster_YYYY_XXXX-YYYY_0.5_2056_5728.tif
 
         Tile ID is at index 2 when split by underscore.
+        Tile IDs encode the 1km LV95 grid position (e.g. 2683-1248).
         """
         tile_index = {}
 
@@ -68,6 +73,17 @@ class TileIndex:
 
         return tile_index
 
+    def _open_tile(self, cache_key, tile_path):
+        """Open a tile and manage cache eviction."""
+        if len(self.tile_cache) >= MAX_CACHED_TILES:
+            evict_key = self._cache_order.pop(0)
+            if evict_key in self.tile_cache:
+                self.tile_cache[evict_key].close()
+                del self.tile_cache[evict_key]
+
+        self.tile_cache[cache_key] = rasterio.open(tile_path)
+        self._cache_order.append(cache_key)
+
     def get_required_tiles(self, bounds):
         """Get list of tile IDs covering a bounding box in LV95 coordinates."""
         minx, miny, maxx, maxy = bounds
@@ -86,6 +102,9 @@ class TileIndex:
         """
         Sample height values from raster tiles at given points.
 
+        Only samples points that fall within each tile's bounds to avoid
+        unnecessary raster reads.
+
         Args:
             points: List of (x, y) tuples in LV95
             tiles: List of tile IDs to search
@@ -95,6 +114,7 @@ class TileIndex:
             numpy array of height values (NaN where no data)
         """
         heights = np.full(len(points), np.nan)
+        points_arr = np.array(points)
         tile_index = self.alti3d_tiles if model_type == 'alti3d' else self.surface3d_tiles
 
         for tile_id in tiles:
@@ -105,7 +125,7 @@ class TileIndex:
                 if tile_path is None:
                     continue
                 try:
-                    self.tile_cache[cache_key] = rasterio.open(tile_path)
+                    self._open_tile(cache_key, tile_path)
                 except Exception as e:
                     print(f"Warning: Could not open {tile_path}: {e}", file=sys.stderr)
                     continue
@@ -113,10 +133,25 @@ class TileIndex:
             src = self.tile_cache[cache_key]
 
             try:
-                sampled = list(src.sample(points, indexes=1))
-                for i, value in enumerate(sampled):
+                # Filter to points within this tile's bounds
+                bounds = src.bounds
+                mask = (
+                    (points_arr[:, 0] >= bounds.left) &
+                    (points_arr[:, 0] <= bounds.right) &
+                    (points_arr[:, 1] >= bounds.bottom) &
+                    (points_arr[:, 1] <= bounds.top)
+                )
+
+                if not mask.any():
+                    continue
+
+                tile_points = [tuple(p) for p in points_arr[mask]]
+                indices = np.where(mask)[0]
+
+                sampled = list(src.sample(tile_points, indexes=1))
+                for idx, value in zip(indices, sampled):
                     if not np.isnan(value[0]) and value[0] != src.nodata:
-                        heights[i] = value[0]
+                        heights[idx] = value[0]
             except Exception as e:
                 print(f"Warning: Error sampling from {tile_id}: {e}", file=sys.stderr)
 
@@ -127,27 +162,35 @@ class TileIndex:
         for src in self.tile_cache.values():
             src.close()
         self.tile_cache.clear()
+        self._cache_order.clear()
 
 
 def calculate_building_volume(polygon, tile_index, egid=None, fid=None,
-                              voxel_size=1.0):
+                              area_official_m2=None, voxel_size=1.0):
     """
     Calculate volume and height metrics for a single building.
+
+    Uses polygon.area (computed from geometry) as the primary footprint area.
+    The official area attribute is kept for reference only.
 
     Args:
         polygon: Shapely Polygon in LV95 (EPSG:2056)
         tile_index: TileIndex instance with loaded elevation tiles
         egid: Optional EGID
         fid: Optional FID from cadastral survey
+        area_official_m2: Optional official area from source data (reference only)
         voxel_size: Grid cell size in meters
 
     Returns:
         Dict with volume, height metrics, and status
     """
+    footprint_area = polygon.area
+
     empty_result = {
         'egid': egid,
         'fid': fid,
-        'area_footprint_m2': round(polygon.area, 2),
+        'area_footprint_m2': round(footprint_area, 2),
+        'area_official_m2': area_official_m2,
         'volume_above_ground_m3': 0,
         'elevation_base_m': np.nan,
         'elevation_roof_base_m': np.nan,
@@ -190,7 +233,6 @@ def calculate_building_volume(polygon, tile_index, egid=None, fid=None,
         building_heights = np.maximum(valid_surface - base_height, 0)
 
         # Volume = sum of heights × cell area
-        footprint_area = polygon.area
         volume = np.sum(building_heights) * (voxel_size ** 2)
 
         # Height metrics
@@ -202,6 +244,7 @@ def calculate_building_volume(polygon, tile_index, egid=None, fid=None,
             'egid': egid,
             'fid': fid,
             'area_footprint_m2': round(footprint_area, 2),
+            'area_official_m2': area_official_m2,
             'volume_above_ground_m3': round(volume, 2),
             'elevation_base_m': round(base_height, 2),
             'elevation_roof_base_m': round(roof_base, 2),

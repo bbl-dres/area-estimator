@@ -15,6 +15,7 @@ small numbers of buildings or when no CSV is available.
 
 import sys
 import json
+import time
 import urllib.request
 import urllib.error
 import pandas as pd
@@ -165,22 +166,24 @@ def enrich_with_gwr(buildings_df, gwr_csv_path=None):
     egids_available = df['egid'].notna()
 
     if gwr_csv_path:
-        # Bulk CSV lookup
+        # Bulk CSV lookup via vectorized merge
         gwr_df = load_gwr_from_csv(gwr_csv_path)
+        gwr_cols = [c for c in ['gkat', 'gklas', 'gbauj', 'gastw'] if c in gwr_df.columns]
 
-        for idx in df.index[egids_available]:
-            egid = int(df.at[idx, 'egid'])
-            if egid in gwr_df.index:
-                row = gwr_df.loc[egid]
-                for col in ['gkat', 'gklas', 'gbauj', 'gastw']:
-                    if col in row.index:
-                        df.at[idx, col] = row[col]
+        # Merge on EGID — only update rows that have an EGID
+        df['_egid_int'] = df.loc[egids_available, 'egid'].astype(int)
+        merged = df[['_egid_int']].merge(
+            gwr_df[gwr_cols], left_on='_egid_int', right_index=True, how='left'
+        )
+        for col in gwr_cols:
+            df.loc[merged.index, col] = merged[col].values
+        df.drop(columns=['_egid_int'], inplace=True)
 
         matched = df.loc[egids_available, 'gkat'].notna().sum()
         print(f"  GWR CSV: matched {matched}/{egids_available.sum()} buildings")
 
     else:
-        # API fallback — query individually
+        # API fallback — query individually with rate limiting
         api_count = egids_available.sum()
         if api_count > 100:
             print(f"Warning: Querying {api_count} buildings via API. "
@@ -189,13 +192,15 @@ def enrich_with_gwr(buildings_df, gwr_csv_path=None):
         matched = 0
         for i, idx in enumerate(df.index[egids_available]):
             egid = int(df.at[idx, 'egid'])
-            print(f"  GWR API: querying {i + 1}/{api_count} (EGID {egid})", end='\r')
+            print(f"  GWR API: querying {i + 1}/{api_count} (EGID {egid})",
+                  end='\r', flush=True)
             result = query_gwr_api(egid)
             for col in ['gkat', 'gklas', 'gbauj', 'gastw']:
                 if result[col] is not None:
                     df.at[idx, col] = result[col]
             if result['gkat'] is not None:
                 matched += 1
+            time.sleep(0.1)
 
         print(f"\n  GWR API: matched {matched}/{api_count} buildings")
 

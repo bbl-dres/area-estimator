@@ -14,6 +14,8 @@ floor count estimation, as it represents the equivalent uniform box height
 and handles complex roof shapes more consistently.
 """
 
+import math
+
 # Floor height lookup table
 # Format: code -> (EG_min, EG_max, RG_min, RG_max, schema, description)
 # EG = Erdgeschoss (ground floor), RG = Regelgeschoss (regular floors)
@@ -61,6 +63,18 @@ ACCURACY_MEDIUM = 'medium'   # ±15-25% — commercial/office
 ACCURACY_LOW = 'low'         # ±25-40% — industrial, special, missing
 
 
+def _safe_int_str(value):
+    """Convert a numeric value to string, handling NaN/None safely."""
+    if value is None:
+        return None
+    try:
+        if isinstance(value, float) and math.isnan(value):
+            return None
+        return str(int(value))
+    except (ValueError, TypeError):
+        return None
+
+
 def get_floor_height(gkat, gklas):
     """
     Look up floor height parameters based on GWR classification.
@@ -70,16 +84,18 @@ def get_floor_height(gkat, gklas):
     Returns: (floor_height_min, floor_height_max, schema_used, description)
     """
     # Try GKLAS first
-    if gklas is not None and str(int(gklas)) in FLOOR_HEIGHT_LOOKUP:
-        entry = FLOOR_HEIGHT_LOOKUP[str(int(gklas))]
+    gklas_str = _safe_int_str(gklas)
+    if gklas_str and gklas_str in FLOOR_HEIGHT_LOOKUP:
+        entry = FLOOR_HEIGHT_LOOKUP[gklas_str]
         if entry[4] == 'GKLAS':
             min_h = (entry[0] + entry[2]) / 2
             max_h = (entry[1] + entry[3]) / 2
             return (min_h, max_h, 'GKLAS', entry[5])
 
     # Try GKAT
-    if gkat is not None and str(int(gkat)) in FLOOR_HEIGHT_LOOKUP:
-        entry = FLOOR_HEIGHT_LOOKUP[str(int(gkat))]
+    gkat_str = _safe_int_str(gkat)
+    if gkat_str and gkat_str in FLOOR_HEIGHT_LOOKUP:
+        entry = FLOOR_HEIGHT_LOOKUP[gkat_str]
         if entry[4] == 'GKAT':
             min_h = (entry[0] + entry[2]) / 2
             max_h = (entry[1] + entry[3]) / 2
@@ -100,8 +116,8 @@ def determine_accuracy(gkat, gklas, has_volume, has_footprint):
     if gkat is None and gklas is None:
         return ACCURACY_LOW
 
-    cat_str = str(int(gkat)) if gkat is not None else ''
-    cls_str = str(int(gklas)) if gklas is not None else ''
+    cat_str = _safe_int_str(gkat) or ''
+    cls_str = _safe_int_str(gklas) or ''
 
     # Residential — best accuracy
     if cat_str == '1020' or cls_str.startswith('11'):
@@ -138,10 +154,10 @@ def estimate_floor_area(volume_result):
     # Initialize area fields
     result.update({
         'area_floor_total_m2': None,
-        'area_floor_above_ground_m2': None,
         'area_accuracy': None,
-        'floors_total': None,
-        'floors_above': None,
+        'floors_estimated': None,
+        'floor_height_used_m': None,
+        'building_type': None,
     })
 
     footprint = result.get('area_footprint_m2', 0)
@@ -178,14 +194,9 @@ def estimate_floor_area(volume_result):
     accuracy = determine_accuracy(gkat, gklas, has_volume, has_footprint)
 
     result['area_floor_total_m2'] = round(area_estimate, 2)
-    result['area_floor_above_ground_m2'] = round(area_estimate, 2)
     result['area_accuracy'] = accuracy
-    result['floors_total'] = floors_rounded
-    result['floors_above'] = floors_rounded
-
-    # Debug info
-    result['_floor_height_used'] = round((fh_min + fh_max) / 2, 2)
-    result['_schema_used'] = schema
-    result['_building_type'] = description
+    result['floors_estimated'] = floors_rounded
+    result['floor_height_used_m'] = round((fh_min + fh_max) / 2, 2)
+    result['building_type'] = description
 
     return result

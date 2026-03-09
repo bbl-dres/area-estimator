@@ -19,7 +19,11 @@ import sys
 from pathlib import Path
 import geopandas as gpd
 import pandas as pd
-from shapely.geometry import Point
+from shapely.geometry import Point, box
+
+
+# Default buffer size (meters) for creating a sampling polygon around a point
+POINT_BUFFER_M = 5.0
 
 
 def load_footprints_from_file(filepath, bbox=None, limit=None):
@@ -29,13 +33,17 @@ def load_footprints_from_file(filepath, bbox=None, limit=None):
     Reads the Bodenbedeckung layer from the Amtliche Vermessung and filters
     to building polygons (BBArt = Gebaeude where applicable).
 
+    Preserves the official area attribute (if present) as area_official_m2 for
+    reference, but the pipeline uses polygon.area for all calculations.
+
     Args:
         filepath: Path to geodata file (.gpkg, .shp, .geojson)
         bbox: Optional bounding box (minlon, minlat, maxlon, maxlat) in WGS84
         limit: Optional maximum number of buildings to load
 
     Returns:
-        GeoDataFrame in LV95 (EPSG:2056) with columns: egid, fid, geometry
+        GeoDataFrame in LV95 (EPSG:2056) with columns:
+            egid, fid, area_official_m2, geometry
     """
     filepath = Path(filepath)
     print(f"Loading footprints from {filepath.name}...")
@@ -61,8 +69,14 @@ def load_footprints_from_file(filepath, bbox=None, limit=None):
     if 'egid' not in gdf.columns:
         gdf['egid'] = None
     if 'fid' not in gdf.columns:
-        # Use index as fallback FID
         gdf['fid'] = gdf.index.astype(str)
+
+    # Preserve official area attribute if present (for reference only)
+    area_col = next((c for c in gdf.columns if c in ('flaeche', 'area', 'shape_area')), None)
+    if area_col:
+        gdf['area_official_m2'] = pd.to_numeric(gdf[area_col], errors='coerce')
+    else:
+        gdf['area_official_m2'] = None
 
     # Filter to buildings if a type column exists
     for type_col in ['bbart', 'art', 'type', 'objektart']:
@@ -85,16 +99,17 @@ def load_footprints_from_file(filepath, bbox=None, limit=None):
         gdf = gdf.head(limit)
 
     print(f"Loaded {len(gdf)} building footprints")
-    return gdf[['egid', 'fid', 'geometry']]
+    return gdf[['egid', 'fid', 'area_official_m2', 'geometry']]
 
 
-def load_coordinates_from_csv(csv_path, alti3d_dir=None, surface3d_dir=None):
+def load_coordinates_from_csv(csv_path):
     """
-    Load a list of WGS84 coordinates from a CSV file and create point geometries.
+    Load WGS84 coordinates from CSV and create buffered polygons for sampling.
 
-    This mode is for processing specific locations — the user provides coordinates
-    and the tool creates a small buffer to sample elevations. Building footprints
-    are not used in this mode.
+    Each coordinate is buffered into a 10×10m square polygon in LV95 so the
+    volume pipeline can sample elevations. The footprint area of these buffers
+    is not meaningful — use this mode for quick elevation checks, not accurate
+    volume estimates.
 
     Expected CSV columns: lon, lat (required), egid (optional), fid (optional)
 
@@ -102,7 +117,8 @@ def load_coordinates_from_csv(csv_path, alti3d_dir=None, surface3d_dir=None):
         csv_path: Path to CSV file with lon, lat columns
 
     Returns:
-        GeoDataFrame in LV95 (EPSG:2056) with columns: egid, fid, geometry
+        GeoDataFrame in LV95 (EPSG:2056) with columns:
+            egid, fid, area_official_m2, geometry (Polygon)
     """
     filepath = Path(csv_path)
     print(f"Loading coordinates from {filepath.name}...")
@@ -132,5 +148,12 @@ def load_coordinates_from_csv(csv_path, alti3d_dir=None, surface3d_dir=None):
     gdf = gpd.GeoDataFrame(df, geometry=geometry, crs='EPSG:4326')
     gdf = gdf.to_crs('EPSG:2056')
 
-    print(f"Loaded {len(gdf)} coordinate points")
-    return gdf[['egid', 'fid', 'geometry']]
+    # Buffer points into square polygons for elevation sampling
+    gdf['geometry'] = gdf.geometry.apply(
+        lambda pt: box(pt.x - POINT_BUFFER_M, pt.y - POINT_BUFFER_M,
+                       pt.x + POINT_BUFFER_M, pt.y + POINT_BUFFER_M)
+    )
+    gdf['area_official_m2'] = None
+
+    print(f"Loaded {len(gdf)} coordinate points (buffered to {POINT_BUFFER_M*2}×{POINT_BUFFER_M*2}m)")
+    return gdf[['egid', 'fid', 'area_official_m2', 'geometry']]
