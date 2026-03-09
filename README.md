@@ -57,8 +57,9 @@ flowchart TD
 
 | Argument | Required | Description |
 |----------|:--------:|-------------|
-| **Input** | | |
-| `--coordinates FILE` | yes | CSV with `id`, `lon`, `lat` columns (WGS84); optionally `egid` |
+| **Input** (mutually exclusive) | | |
+| `--coordinates FILE` | one of | CSV with `id`, `lon`, `lat` columns (WGS84); optionally `egid` |
+| `--footprints FILE` | one of | Geodata file with building polygons (GeoPackage, Shapefile, or GeoJSON from AV) |
 | **Elevation data** | | |
 | `--alti3d DIR` | yes | Directory with swissALTI3D GeoTIFF tiles |
 | `--surface3d DIR` | yes | Directory with swissSURFACE3D GeoTIFF tiles |
@@ -67,6 +68,7 @@ flowchart TD
 | `-o, --output FILE` | | Output CSV file path (default: `data/output/result_<timestamp>.csv`) |
 | **Filters** | | |
 | `-l, --limit N` | | Process only the first N buildings |
+| `-b, --bbox MIN_LON MIN_LAT MAX_LON MAX_LAT` | | Bounding box filter in WGS84 (only with `--footprints`) |
 | **Area estimation** (off by default) | | |
 | `--estimate-area` | | Enable Step 4: floor area estimation |
 | `--gwr-csv FILE` | | GWR CSV from [housing-stat.ch](https://www.housing-stat.ch/de/data/supply/public.html); if omitted, uses swisstopo API |
@@ -75,11 +77,25 @@ flowchart TD
 
 ## Examples
 
+### Setup
+
 ```bash
 pip install -r python/requirements.txt
 ```
 
-Minimal run — volume and heights only:
+### Input CSV format
+
+```csv
+id,lon,lat,egid
+1,8.5391,47.3769,1234567
+2,8.5010,47.3925,
+3,7.4474,46.9480,9876543
+```
+
+The `egid` column is optional — when provided, it enables GWR enrichment in Step 4.
+
+### Minimal run — volume and heights only
+
 ```bash
 python python/main.py \
     --coordinates my_buildings.csv \
@@ -87,7 +103,20 @@ python python/main.py \
     --surface3d data/swisssurface3d
 ```
 
-With auto-fetch and floor area estimation:
+### Auto-fetch tiles from swisstopo
+
+No need to pre-download elevation data — missing tiles are downloaded on-the-fly:
+
+```bash
+python python/main.py \
+    --coordinates my_buildings.csv \
+    --alti3d data/swissalti3d \
+    --surface3d data/swisssurface3d \
+    --auto-fetch
+```
+
+### Full pipeline with floor area estimation
+
 ```bash
 python python/main.py \
     --coordinates my_buildings.csv \
@@ -96,6 +125,55 @@ python python/main.py \
     --auto-fetch \
     --estimate-area --gwr-csv data/gwr/buildings.csv \
     -o results.csv
+```
+
+### Floor area estimation without GWR CSV (API fallback)
+
+If you don't have the GWR bulk CSV, the tool queries the swisstopo REST API per building.
+Best for small datasets (< 100 buildings) due to rate limiting:
+
+```bash
+python python/main.py \
+    --coordinates my_buildings.csv \
+    --alti3d data/swissalti3d \
+    --surface3d data/swisssurface3d \
+    --estimate-area
+```
+
+### Process first N buildings (for testing)
+
+```bash
+python python/main.py \
+    --coordinates my_buildings.csv \
+    --alti3d data/swissalti3d \
+    --surface3d data/swisssurface3d \
+    --auto-fetch \
+    --limit 10
+```
+
+### Using geodata footprints instead of CSV
+
+If you already have building polygons from the Amtliche Vermessung:
+
+```bash
+python python/main.py \
+    --footprints data/av/buildings.gpkg \
+    --alti3d data/swissalti3d \
+    --surface3d data/swisssurface3d \
+    --auto-fetch \
+    --estimate-area --gwr-csv data/gwr/buildings.csv
+```
+
+### Filter footprints by bounding box
+
+Process only buildings within a WGS84 bounding box (e.g. central Zurich):
+
+```bash
+python python/main.py \
+    --footprints data/av/buildings.gpkg \
+    --alti3d data/swissalti3d \
+    --surface3d data/swisssurface3d \
+    --bbox 8.52 47.36 8.56 47.39
 ```
 
 ---
