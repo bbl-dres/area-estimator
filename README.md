@@ -144,7 +144,7 @@ Input columns are preserved in the output with `input_` prefix: `input_id`, `inp
 Generates a building-oriented 1×1m sampling grid aligned to the minimum rotated rectangle of the footprint. No columns added to output CSV — grid points are consumed internally by Step 3.
 
 <p align="center">
-  <img src="images/grid_alignment.svg" width="700" alt="Axis-aligned vs building-aligned grid comparison" />
+  <img src="images/Oriented_Grid.jpg" width="70%" />
 </p>
 
 ### Step 3 — Volume & Heights
