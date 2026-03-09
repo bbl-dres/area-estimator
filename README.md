@@ -7,6 +7,8 @@
 
 Estimates building volumes and gross floor areas using publicly available Swiss elevation models and cadastral data.
 
+> **Two implementations available:** This workflow is provided as a **Python CLI** (`python/`) and as an **FME workbench** (`fme/`). Both can be downloaded and used independently. The FME version requires a licensed copy of [FME Desktop](https://fme.safe.com/).
+
 <p align="center">
   <img src="images/Preview_2.jpg" width="45%" />
   <img src="images/Preview_3.jpg" width="45%" />
