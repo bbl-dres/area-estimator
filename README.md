@@ -174,43 +174,42 @@ python python/main.py --coordinates my_buildings.csv \
 
 ## Inputs
 
-| Dataset | Status | Used in | Description | Source |
-|---------|:------:|:-------:|-------------|--------|
-| **Building footprints** | MUST | Step 1 | Building polygons — `.gpkg`, `.shp`, `.geojson`, or CSV with coordinates | [geodienste.ch](https://www.geodienste.ch/services/av) |
-| **Amtliche Vermessung** | MUST (with `--geojson`) | Step 1 | AV GeoPackage — spatial footprint lookup via point-in-polygon | [geodienste.ch](https://www.geodienste.ch/services/av) |
-| **swissALTI3D** | MUST | Step 3 | Terrain elevation (DTM), 0.5m resolution, 1 km² GeoTIFF tiles | [swisstopo](https://www.swisstopo.admin.ch/de/hoehenmodell-swissalti3d) |
-| **swissSURFACE3D Raster** | MUST | Step 3 | Surface elevation (DSM), 0.5m resolution, 1 km² GeoTIFF tiles | [swisstopo](https://www.swisstopo.admin.ch/de/hoehenmodell-swisssurface3d-raster) |
-| **GWR classification** | OPTIONAL | Step 4 | Building category/class for floor height lookup, via EGID | [housing-stat.ch](https://www.housing-stat.ch/de/data/supply/public.html) |
+### Step 1 — Building Footprints
 
-### Building footprints (Step 1)
+| Column | Status | Source | Description |
+|--------|:------:|--------|-------------|
+| Building polygons | MUST | [geodienste.ch](https://www.geodienste.ch/services/av) | `.gpkg`, `.shp`, `.geojson` — or CSV with `lon`, `lat` coordinates |
+| AV GeoPackage | MUST (with `--geojson`) | [geodienste.ch](https://www.geodienste.ch/services/av) | Spatial footprint lookup via point-in-polygon containment |
 
 Three input modes:
 
-| Input mode | Flag | Accepts | Matching |
-|------------|------|---------|----------|
-| Geodata file | `--footprints` | `.gpkg`, `.shp`, `.geojson` — auto-filters to `Art = Gebaeude` | Direct polygons from file |
-| Coordinates | `--coordinates` | CSV with `lon`, `lat` (optionally `egid`, `fid`) — buffered to 10×10 m | No AV lookup |
-| GeoJSON + AV | `--geojson` + `--av` | GeoJSON with Point geometries (WGS84) | **Spatial containment** — point must fall inside an AV building polygon |
+| Column | Status | Source | Description |
+|--------|:------:|--------|-------------|
+| `--footprints FILE` | MUST (one of three) | Geodata file | `.gpkg`, `.shp`, `.geojson` — auto-filters to `Art = Gebaeude` |
+| `--coordinates FILE` | MUST (one of three) | CSV | `lon`, `lat` columns (WGS84), optionally `egid`, `fid` — buffered to 10×10 m |
+| `--geojson FILE` + `--av FILE` | MUST (one of three) | GeoJSON + AV | Point geometries (WGS84) — spatial containment against AV building polygons |
 
 For `--geojson` mode, matching is purely spatial: the WGS84 point is transformed to LV95 and tested against AV building polygons. If the point falls inside a polygon, the footprint and its `GWR_EGID` are used. If not, the feature gets status `no_building_at_point`. There is no fuzzy or nearest-neighbor matching.
 
-### Elevation tiles (Step 3)
+### Step 3 — Elevation Tiles
 
-| Dataset | Type | Measures | Resolution | Format |
-|---------|------|----------|:----------:|--------|
-| **swissALTI3D** | DTM | Bare earth elevation | 0.5 m | Cloud-Optimized GeoTIFF |
-| **swissSURFACE3D Raster** | DSM | Top of buildings, vegetation | 0.5 m | Cloud-Optimized GeoTIFF |
+| Column | Status | Source | Description |
+|--------|:------:|--------|-------------|
+| swissALTI3D tiles | MUST | [swisstopo](https://www.swisstopo.admin.ch/de/hoehenmodell-swissalti3d) | Terrain elevation (DTM), 0.5m resolution, 1 km² Cloud-Optimized GeoTIFF |
+| swissSURFACE3D Raster tiles | MUST | [swisstopo](https://www.swisstopo.admin.ch/de/hoehenmodell-swisssurface3d-raster) | Surface elevation (DSM), 0.5m resolution, 1 km² Cloud-Optimized GeoTIFF |
 
 Tile naming: `swissalti3d_YYYY_XXXX-YYYY_0.5_2056_5728.tif` — tile ID = SW corner in LV95 ÷ 1000. With `--auto-fetch`, missing tiles are downloaded from swisstopo on demand.
 
-### GWR classification (Step 4, optional)
+### Step 4 — GWR Classification (optional)
 
-| Property | Value |
-|----------|-------|
-| Source | [housing-stat.ch](https://www.housing-stat.ch/de/index.html) |
-| Catalog | [GWR v4.3](https://www.housing-stat.ch/catalog/en/4.3/final) |
-| Key fields | `GKAT` (category), `GKLAS` (class), `GBAUJ` (year), `GASTW` (stories) |
-| Access | CSV bulk from [housing-stat.ch/data](https://www.housing-stat.ch/de/data/supply/public.html) or swisstopo API per EGID |
+| Column | Status | Source | Description |
+|--------|:------:|--------|-------------|
+| `GKAT` | OPTIONAL | [housing-stat.ch](https://www.housing-stat.ch/de/index.html) | Building category code (1010–1080) |
+| `GKLAS` | OPTIONAL | [housing-stat.ch](https://www.housing-stat.ch/de/index.html) | Building class code (1110–1274) |
+| `GBAUJ` | OPTIONAL | [housing-stat.ch](https://www.housing-stat.ch/de/index.html) | Construction year |
+| `GASTW` | OPTIONAL | [housing-stat.ch](https://www.housing-stat.ch/de/index.html) | Number of stories |
+
+Access: CSV bulk from [housing-stat.ch/data](https://www.housing-stat.ch/de/data/supply/public.html) or swisstopo API per EGID. Catalog: [GWR v4.3](https://www.housing-stat.ch/catalog/en/4.3/final).
 
 ---
 
@@ -291,7 +290,11 @@ flowchart LR
     E --> F[Rotate back to original orientation]
 ```
 
-Why oriented grids? A 45°-rotated building gets poor coverage from an axis-aligned grid. Aligning to building edges maximizes valid sample points.
+Why oriented grids? A rotated building gets poor coverage from an axis-aligned grid. Aligning to building edges maximizes valid sample points:
+
+<p align="center">
+  <img src="images/grid_alignment.svg" width="700" alt="Axis-aligned vs building-aligned grid comparison" />
+</p>
 
 ### Step 3 — Volume & Height Metrics
 
