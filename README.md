@@ -83,7 +83,11 @@ flowchart TD
 pip install -r python/requirements.txt
 ```
 
-### Input CSV format
+### Example 1 — Estimate volumes for a list of buildings (CSV)
+
+You have a CSV with building coordinates (e.g. exported from a portfolio system).
+The tool buffers each point into a 10x10 m sampling polygon, fetches the elevation
+tiles it needs, and outputs volume and height metrics:
 
 ```csv
 id,lon,lat,egid
@@ -94,28 +98,16 @@ id,lon,lat,egid
 
 The `egid` column is optional — when provided, it enables GWR enrichment in Step 4.
 
-### Minimal run — volume and heights only
-
-```bash
-python python/main.py \
-    --coordinates my_buildings.csv \
-    --alti3d data/swissalti3d \
-    --surface3d data/swisssurface3d
-```
-
-### Auto-fetch tiles from swisstopo
-
-No need to pre-download elevation data — missing tiles are downloaded on-the-fly:
-
 ```bash
 python python/main.py \
     --coordinates my_buildings.csv \
     --alti3d data/swissalti3d \
     --surface3d data/swisssurface3d \
-    --auto-fetch
+    --auto-fetch \
+    -o portfolio_volumes.csv
 ```
 
-### Full pipeline with floor area estimation
+Add `--estimate-area` with a GWR CSV to also get floor area estimates:
 
 ```bash
 python python/main.py \
@@ -124,23 +116,61 @@ python python/main.py \
     --surface3d data/swisssurface3d \
     --auto-fetch \
     --estimate-area --gwr-csv data/gwr/buildings.csv \
-    -o results.csv
+    -o portfolio_full.csv
 ```
 
-### Floor area estimation without GWR CSV (API fallback)
-
-If you don't have the GWR bulk CSV, the tool queries the swisstopo REST API per building.
-Best for small datasets (< 100 buildings) due to rate limiting:
+For small datasets (< 100 buildings) without a GWR CSV, the tool can query the
+swisstopo REST API per building instead:
 
 ```bash
 python python/main.py \
     --coordinates my_buildings.csv \
     --alti3d data/swissalti3d \
     --surface3d data/swisssurface3d \
+    --auto-fetch \
     --estimate-area
 ```
 
-### Process first N buildings (for testing)
+### Example 2 — Process all buildings in Switzerland (AV footprints)
+
+Download the full Amtliche Vermessung dataset from
+[geodienste.ch](https://www.geodienste.ch/services/av) as a GeoPackage, and the
+complete swissALTI3D + swissSURFACE3D tile sets from swisstopo. Then run:
+
+```bash
+python python/main.py \
+    --footprints data/av/ch_av_2056.gpkg \
+    --alti3d /data/swisstopo/swissalti3d \
+    --surface3d /data/swisstopo/swisssurface3d \
+    --estimate-area --gwr-csv data/gwr/buildings.csv \
+    -o results/ch_all_buildings.csv
+```
+
+This processes ~2.5 million buildings. For a first test run, limit to a small batch:
+
+```bash
+python python/main.py \
+    --footprints data/av/ch_av_2056.gpkg \
+    --alti3d /data/swisstopo/swissalti3d \
+    --surface3d /data/swisstopo/swisssurface3d \
+    --limit 100
+```
+
+To process a specific region (e.g. City of Bern), use a bounding box filter:
+
+```bash
+python python/main.py \
+    --footprints data/av/ch_av_2056.gpkg \
+    --alti3d /data/swisstopo/swissalti3d \
+    --surface3d /data/swisstopo/swisssurface3d \
+    --bbox 7.40 46.93 7.48 46.97 \
+    --estimate-area --gwr-csv data/gwr/buildings.csv \
+    -o results/bern_buildings.csv
+```
+
+### Example 3 — Quick test with auto-fetch
+
+No local elevation data needed — the tool downloads tiles on-the-fly from swisstopo:
 
 ```bash
 python python/main.py \
@@ -149,31 +179,6 @@ python python/main.py \
     --surface3d data/swisssurface3d \
     --auto-fetch \
     --limit 10
-```
-
-### Using geodata footprints instead of CSV
-
-If you already have building polygons from the Amtliche Vermessung:
-
-```bash
-python python/main.py \
-    --footprints data/av/buildings.gpkg \
-    --alti3d data/swissalti3d \
-    --surface3d data/swisssurface3d \
-    --auto-fetch \
-    --estimate-area --gwr-csv data/gwr/buildings.csv
-```
-
-### Filter footprints by bounding box
-
-Process only buildings within a WGS84 bounding box (e.g. central Zurich):
-
-```bash
-python python/main.py \
-    --footprints data/av/buildings.gpkg \
-    --alti3d data/swissalti3d \
-    --surface3d data/swisssurface3d \
-    --bbox 8.52 47.36 8.56 47.39
 ```
 
 ---
