@@ -59,7 +59,7 @@ flowchart TD
 |----------|:--------:|-------------|
 | **Input** (one required) | | |
 | `--footprints FILE` | * | Geodata file (`.gpkg`, `.shp`, `.geojson`) from Amtliche Vermessung |
-| `--coordinates FILE` | * | CSV with `lon`, `lat` columns (WGS84), optionally `egid`, `fid` |
+| `--coordinates FILE` | * | CSV with `lon`, `lat` columns (WGS84); optionally `egid`, `fid` |
 | `--geojson FILE` | * | GeoJSON with building addresses (Point + EGID) — requires `--av` |
 | **Elevation data** | | |
 | `--alti3d DIR` | yes | Directory with swissALTI3D GeoTIFF tiles |
@@ -132,16 +132,14 @@ python python/main.py \
 
 ### Input Columns
 
-Expected columns in the user-provided buildings file (CSV, GeoJSON, or geodata).
+Expected columns in the user-provided buildings CSV.
 
-| Column | Description |
-|--------|-------------|
-| `lon` / `longitude` / `lng` / `x` | WGS84 longitude — required for `--coordinates` |
-| `lat` / `latitude` / `y` | WGS84 latitude — required for `--coordinates` |
-| `egid` | Federal building ID (optional) |
-| `fid` | Feature ID (optional, defaults to row index) |
-| `bbl_id` | Building address ID — mapped to `input_id` in output (optional, `--geojson` only) |
-| `geometry` | Polygon (`--footprints`) or Point (`--geojson`) — read from geodata, not CSV |
+| Column | Status | Description |
+|--------|--------|-------------|
+| `lon` | MUST | WGS84 longitude |
+| `lat` | MUST | WGS84 latitude |
+| `id` | MUST | Building ID — mapped to `input_id` in output |
+| `egid` | OPTIONAL | Federal building ID — used for GWR enrichment |
 
 ---
 

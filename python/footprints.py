@@ -7,8 +7,8 @@ Loads building polygons from one of three sources:
 2. CSV with WGS84 coordinates — buffered into small sampling polygons
 3. GeoJSON with point features — footprints resolved from AV via spatial containment
 
-All functions return a GeoDataFrame in LV95 (EPSG:2056) with a consistent schema:
-    egid, fid, area_official_m2, geometry, status
+All functions return a GeoDataFrame in LV95 (EPSG:2056) with columns:
+    egid, area_official_m2, geometry, status (+ id for CSV, fid for geodata/GeoJSON)
 """
 
 import json
@@ -93,9 +93,10 @@ def load_coordinates_from_csv(csv_path, limit=None):
     """
     Load WGS84 coordinates from CSV and buffer into 10x10m sampling polygons.
 
-    Expected columns: lon, lat (required), egid (optional), fid (optional)
+    Required columns: lon, lat, id
+    Optional columns: egid
 
-    Returns GeoDataFrame in LV95 with columns: egid, fid, area_official_m2, geometry, status
+    Returns GeoDataFrame in LV95 with columns: id, egid, area_official_m2, geometry, status
     """
     filepath = Path(csv_path)
     log.info(f"Loading coordinates from {filepath.name}...")
@@ -106,21 +107,18 @@ def load_coordinates_from_csv(csv_path, limit=None):
     df = pd.read_csv(filepath)
     df.columns = [c.lower().strip() for c in df.columns]
 
-    lon_col = next((c for c in df.columns if c in ('lon', 'longitude', 'lng', 'x')), None)
-    lat_col = next((c for c in df.columns if c in ('lat', 'latitude', 'y')), None)
-
-    if lon_col is None or lat_col is None:
-        raise ValueError(f"CSV must have lon/lat columns. Found: {list(df.columns)}")
+    required = ['lon', 'lat', 'id']
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise ValueError(f"CSV missing required columns: {missing}. Found: {list(df.columns)}")
 
     if 'egid' not in df.columns:
         df['egid'] = None
-    if 'fid' not in df.columns:
-        df['fid'] = df.index.astype(str)
 
     if limit:
         df = df.head(limit)
 
-    geometry = [Point(row[lon_col], row[lat_col]) for _, row in df.iterrows()]
+    geometry = [Point(row['lon'], row['lat']) for _, row in df.iterrows()]
     gdf = gpd.GeoDataFrame(df, geometry=geometry, crs='EPSG:4326')
     gdf = gdf.to_crs('EPSG:2056')
 
@@ -133,7 +131,7 @@ def load_coordinates_from_csv(csv_path, limit=None):
     gdf['status'] = 'ok'
 
     log.info(f"Loaded {len(gdf)} coordinates (buffered to {POINT_BUFFER_M*2}x{POINT_BUFFER_M*2}m)")
-    return gdf[['egid', 'fid', 'area_official_m2', 'geometry', 'status']]
+    return gdf[['id', 'egid', 'area_official_m2', 'geometry', 'status']]
 
 
 def _find_av_building_at_point(lon, lat, av_path, av_layer):
@@ -181,7 +179,7 @@ def load_geojson_with_av(geojson_path, av_path, av_layer="lcsf", limit=None):
     the point must fall inside an AV building polygon.
 
     Input properties are preserved with 'input_' prefix:
-      - input_id: from 'bbl_id' in source (or index)
+      - input_id: from 'id' in source (or index)
       - input_egid: from 'egid' in source (reference only)
 
     The authoritative EGID comes from the AV (GWR_EGID attribute).
@@ -212,7 +210,7 @@ def load_geojson_with_av(geojson_path, av_path, av_layer="lcsf", limit=None):
         polygon, av_egid, av_fid = _find_av_building_at_point(lon, lat, av_path, av_layer)
 
         row = {
-            "input_id": props.get("bbl_id", str(i)),
+            "input_id": props.get("id", str(i)),
             "input_egid": props.get("egid", ""),
             "input_lon": lon,
             "input_lat": lat,

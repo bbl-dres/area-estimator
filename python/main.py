@@ -224,9 +224,9 @@ def main():
                     area_official_m2=row['area_official_m2'],
                 )
 
-            # Preserve extra columns from input (e.g. bbl_id)
+            # Preserve extra columns from input (e.g. input_id)
             for col in buildings.columns:
-                if col not in ('egid', 'fid', 'area_official_m2', 'geometry', 'status'):
+                if col not in ('id', 'egid', 'fid', 'area_official_m2', 'geometry', 'status'):
                     result[col] = row[col]
 
             results.append(result)
