@@ -14,12 +14,15 @@ Outputs per building:
 - height_minimal_m        (volume / footprint — equivalent uniform box height)
 """
 
+import logging
 import sys
 from pathlib import Path
 import numpy as np
 import rasterio
 
 from grid import create_aligned_grid_points
+
+log = logging.getLogger(__name__)
 
 # LRU-style tile cache limit (each open tile = one file handle)
 MAX_CACHED_TILES = 50
@@ -34,11 +37,11 @@ class TileIndex:
         self.tile_cache = {}
         self._cache_order = []
 
-        print("Indexing available tiles...")
+        log.info("Indexing available tiles...")
         self.alti3d_tiles = self._index_tiles(self.alti3d_dir)
         self.surface3d_tiles = self._index_tiles(self.surface3d_dir)
-        print(f"  Found {len(self.alti3d_tiles)} swissALTI3D tiles")
-        print(f"  Found {len(self.surface3d_tiles)} swissSURFACE3D tiles")
+        log.info(f"  Found {len(self.alti3d_tiles)} swissALTI3D tiles")
+        log.info(f"  Found {len(self.surface3d_tiles)} swissSURFACE3D tiles")
 
     def _index_tiles(self, directory):
         """
@@ -54,7 +57,7 @@ class TileIndex:
         tile_index = {}
 
         if not directory.exists():
-            print(f"Warning: Directory not found: {directory}", file=sys.stderr)
+            log.warning(f"Directory not found: {directory}")
             return tile_index
 
         for filepath in directory.glob("*.tif"):
@@ -65,11 +68,9 @@ class TileIndex:
                     if '-' in tile_id and len(tile_id.split('-')) == 2:
                         tile_index[tile_id] = filepath
                     else:
-                        print(f"Warning: Unexpected tile ID format in {filepath.name}",
-                              file=sys.stderr)
+                        log.debug(f"Unexpected tile ID format in {filepath.name}")
             except Exception as e:
-                print(f"Warning: Could not parse tile from {filepath.name}: {e}",
-                      file=sys.stderr)
+                log.debug(f"Could not parse tile from {filepath.name}: {e}")
 
         return tile_index
 
@@ -127,7 +128,7 @@ class TileIndex:
                 try:
                     self._open_tile(cache_key, tile_path)
                 except Exception as e:
-                    print(f"Warning: Could not open {tile_path}: {e}", file=sys.stderr)
+                    log.debug(f"Could not open {tile_path}: {e}")
                     continue
 
             src = self.tile_cache[cache_key]
@@ -153,9 +154,25 @@ class TileIndex:
                     if not np.isnan(value[0]) and value[0] != src.nodata:
                         heights[idx] = value[0]
             except Exception as e:
-                print(f"Warning: Error sampling from {tile_id}: {e}", file=sys.stderr)
+                log.debug(f"Error sampling from {tile_id}: {e}")
 
         return heights
+
+    def add_tiles(self, directory, model_type):
+        """Incrementally index new tiles from a directory without full rescan."""
+        tile_index = self.alti3d_tiles if model_type == 'alti3d' else self.surface3d_tiles
+        new_count = 0
+        for filepath in Path(directory).glob("*.tif"):
+            try:
+                parts = filepath.stem.split('_')
+                if len(parts) >= 3:
+                    tile_id = parts[2]
+                    if '-' in tile_id and tile_id not in tile_index:
+                        tile_index[tile_id] = filepath
+                        new_count += 1
+            except Exception:
+                pass
+        return new_count
 
     def close(self):
         """Close all cached raster files."""
@@ -256,5 +273,5 @@ def calculate_building_volume(polygon, tile_index, egid=None, fid=None,
         }
 
     except Exception as e:
-        print(f"Error processing building (EGID={egid}, FID={fid}): {e}", file=sys.stderr)
+        log.debug(f"Error processing building (EGID={egid}, FID={fid}): {e}")
         return {**empty_result, 'status': 'error'}

@@ -20,7 +20,7 @@ Estimates building volumes and gross floor areas using publicly available Swiss 
 ```mermaid
 flowchart TD
     subgraph INPUT
-        A1[Building footprints<br><i>GeoPackage / Shapefile / CSV coords</i>]
+        A1[Building footprints<br><i>GeoPackage / Shapefile / GeoJSON / CSV</i>]
         A2[swissALTI3D tiles<br><i>terrain DTM, 0.5m</i>]
         A3[swissSURFACE3D tiles<br><i>surface DSM, 0.5m</i>]
     end
@@ -29,7 +29,7 @@ flowchart TD
     A2 --> S3
     A3 --> S3
 
-    S1["<b>Step 1 — Read Footprints</b><br>Bodenbedeckung or CSV coordinates<br>EGID + FID identifiers<br>WGS84 → LV95"]
+    S1["<b>Step 1 — Read Footprints</b><br>Spatial containment matching (point-in-polygon)<br>input_id, input_egid → egid from AV<br>WGS84 → LV95"]
     S2["<b>Step 2 — Aligned 1×1m Grid</b><br>Minimum rotated rectangle orientation<br>Grid points filtered to footprint"]
     S3["<b>Step 3 — Volume & Heights</b><br>Sample DTM + DSM at each point<br>Volume = Σ max(surface − base, 0) × 1m²"]
     S4["<b>Step 4 — Floor Areas</b> <i>(optional)</i><br>GWR classification → floor height<br>Floors = height_minimal / floor_height<br>GFA = footprint × floors"]
@@ -98,6 +98,23 @@ lon,lat,egid
 7.4512,46.9495,2345678
 ```
 
+### Process a GeoJSON with AV footprint lookup
+
+For GeoJSON files with building addresses (e.g. point features with EGID), the pipeline
+looks up the actual building footprint from the Amtliche Vermessung via spatial query:
+
+```bash
+python python/main.py \
+    --geojson data/buildings.geojson \
+    --av D:/AV_lv95/av_2056.gpkg \
+    --alti3d D:/SwissAlti3D \
+    --surface3d "D:/swissSURFACE3D Raster" \
+    --auto-fetch \
+    -o data/output/results.csv
+```
+
+`--auto-fetch` downloads any missing elevation tiles from swisstopo on the fly.
+
 ### With filters
 
 ```bash
@@ -136,9 +153,14 @@ python python/main.py --coordinates my_buildings.csv \
 | **Input** (one required) | | |
 | `--footprints FILE` | * | Geodata file (`.gpkg`, `.shp`, `.geojson`) from Amtliche Vermessung |
 | `--coordinates FILE` | * | CSV with `lon`, `lat` columns (WGS84), optionally `egid`, `fid` |
+| `--geojson FILE` | * | GeoJSON with building addresses (Point + EGID) — requires `--av` |
 | **Elevation data** | | |
 | `--alti3d DIR` | yes | Directory with swissALTI3D GeoTIFF tiles |
 | `--surface3d DIR` | yes | Directory with swissSURFACE3D GeoTIFF tiles |
+| `--auto-fetch` | | Automatically download missing tiles from swisstopo |
+| **AV lookup** (for `--geojson`) | | |
+| `--av FILE` | with `--geojson` | AV GeoPackage (e.g. `av_2056.gpkg`) for footprint lookup |
+| `--av-layer NAME` | | AV layer name (default: `lcsf`) |
 | **Output** | | |
 | `-o, --output FILE` | yes | Output CSV file path |
 | **Filters** | | |
@@ -152,41 +174,38 @@ python python/main.py --coordinates my_buildings.csv \
 
 ## Input Data
 
-### 1. Building Footprints
+| Dataset | Status | Description | Source |
+|---------|:------:|-------------|--------|
+| **Building footprints** | MUST | Geodata file (`.gpkg`, `.shp`, `.geojson`) or CSV with coordinates | [geodienste.ch/services/av](https://www.geodienste.ch/services/av) |
+| **Amtliche Vermessung** | MUST (with `--geojson`) | AV GeoPackage for spatial footprint lookup | [geodienste.ch/services/av](https://www.geodienste.ch/services/av) |
+| **swissALTI3D** | MUST | Terrain elevation (DTM), 0.5m GeoTIFF tiles | [swisstopo](https://www.swisstopo.admin.ch/de/hoehenmodell-swissalti3d) |
+| **swissSURFACE3D Raster** | MUST | Surface elevation (DSM), 0.5m GeoTIFF tiles | [swisstopo](https://www.swisstopo.admin.ch/de/hoehenmodell-swisssurface3d-raster) |
+| **GWR classification** | OPTIONAL | Building category/class for floor area estimation (Step 4) | [housing-stat.ch](https://www.housing-stat.ch/de/data/supply/public.html) |
 
-```mermaid
-flowchart LR
-    AV["geodienste.ch<br><b>Amtliche Vermessung</b>"] -->|Bodenbedeckung layer<br>BBArt = Gebaeude| File["GeoPackage / Shapefile / GeoJSON"]
-    File -->|"--footprints"| Tool
-    CSV["User CSV<br>lon, lat, egid"] -->|"--coordinates"| Tool
-    Tool["main.py"]
-```
+### Building Footprints
 
-| Property | Value |
-|----------|-------|
-| Source | [geodienste.ch/services/av](https://www.geodienste.ch/services/av) |
-| Layer | Bodenbedeckung, filtered to `BBArt = Gebaeude` |
-| Identifiers | **EGID** (federal building ID) + **FID** (cadastral survey feature ID) |
-| Formats | GeoPackage (`.gpkg`), Shapefile (`.shp`), GeoJSON (`.geojson`), or CSV with `lon`/`lat` |
-| Data model | [DM.01-AV-CH](https://www.cadastre-manual.admin.ch/de/datenmodell-der-amtlichen-vermessung-dm01-av-ch) |
+Three input modes are supported:
 
-### 2. Elevation Models
+| Input mode | Flag | Accepts | Matching |
+|------------|------|---------|----------|
+| Geodata file | `--footprints` | `.gpkg`, `.shp`, `.geojson` — auto-filters to buildings if type column present | Direct polygons from file |
+| Coordinates | `--coordinates` | CSV with `lon`, `lat` (optionally `egid`, `fid`) — each point is buffered into a 10×10 m polygon | No AV lookup |
+| GeoJSON + AV | `--geojson` + `--av` | GeoJSON with Point geometries (WGS84) | **Spatial containment** — point must fall inside an AV building polygon |
 
-| Dataset | Type | Measures | Resolution | Download |
-|---------|------|----------|:----------:|----------|
-| **swissALTI3D** | DTM (terrain) | Bare earth elevation | 0.5 m | [swisstopo](https://www.swisstopo.admin.ch/de/hoehenmodell-swissalti3d) |
-| **swissSURFACE3D** | DSM (surface) | Top of buildings, vegetation | 0.5 m | [swisstopo](https://www.swisstopo.admin.ch/de/hoehenmodell-swisssurface3d-raster) |
+For `--geojson` mode, matching is purely spatial: the input WGS84 point is transformed to LV95 and tested against AV building polygons (`Art = Gebaeude`). If the point falls inside a polygon, the building footprint and its `GWR_EGID` are used. If not, the feature gets status `no_building_at_point`. There is no fuzzy or nearest-neighbor matching.
 
-GeoTIFF tiles in LV95 (EPSG:2056), named by grid position:
+### Elevation Models
 
-```
-swissalti3d_YYYY_XXXX-YYYY_0.5_2056_5728.tif
-swisssurface3d-raster_YYYY_XXXX-YYYY_0.5_2056_5728.tif
-```
+| Dataset | Type | Measures | Resolution | Tiles | Format |
+|---------|------|----------|:----------:|:-----:|--------|
+| **swissALTI3D** | DTM (terrain) | Bare earth elevation | 0.5 m | 1 km² | Cloud-Optimized GeoTIFF |
+| **swissSURFACE3D Raster** | DSM (surface) | Top of buildings, vegetation | 0.5 m | 1 km² | Cloud-Optimized GeoTIFF |
 
-> Tile ID `XXXX-YYYY` = SW corner ÷ 1000. Example: `2609-1176` covers E 2609000–2610000, N 1176000–1177000.
+Tile naming: `swissalti3d_YYYY_XXXX-YYYY_0.5_2056_5728.tif` — tile ID `XXXX-YYYY` = SW corner in LV95 ÷ 1000.
 
-### 3. GWR Classification (optional)
+With `--auto-fetch`, the pipeline downloads only the tiles it needs from swisstopo on demand.
+
+### GWR Classification (optional)
 
 Required only for Step 4 (`--estimate-area`). Links to buildings via EGID.
 
@@ -195,28 +214,7 @@ Required only for Step 4 (`--estimate-area`). Links to buildings via EGID.
 | Source | [housing-stat.ch](https://www.housing-stat.ch/de/index.html) |
 | Catalog | [GWR v4.3](https://www.housing-stat.ch/catalog/en/4.3/final) |
 | Key fields | `GKAT` (category), `GKLAS` (class), `GBAUJ` (year), `GASTW` (stories) |
-
-| Access method | Use case |
-|---------------|----------|
-| **CSV bulk download** | All of Switzerland — [housing-stat.ch/data](https://www.housing-stat.ch/de/data/supply/public.html) |
-| **swisstopo API** | Individual lookups by EGID — [docs](https://docs.geo.admin.ch/access-data/search.html) |
-
-<details>
-<summary>swisstopo API example</summary>
-
-```http
-# 1. Search by EGID
-GET https://api3.geo.admin.ch/rest/services/ech/SearchServer
-    ?searchText={EGID}&type=locations&origins=address
-
-# 2. Get full attributes by feature ID
-GET https://api3.geo.admin.ch/rest/services/ech/MapServer
-    /ch.bfs.gebaeude_wohnungs_register/{featureId}
-```
-
-Returns: `egid`, `gkat`, `gklas`, `gbauj`, `gastw`, `garea`, `ganzwhg`, `egrid`.
-
-</details>
+| Access | CSV bulk download from [housing-stat.ch/data](https://www.housing-stat.ch/de/data/supply/public.html) or swisstopo API per EGID |
 
 ---
 
@@ -224,18 +222,14 @@ Returns: `egid`, `gkat`, `gklas`, `gbauj`, `gastw`, `garea`, `ganzwhg`, `egrid`.
 
 ### Step 1 — Read Building Footprints
 
-Loads building polygons from a geodata file or CSV coordinates. Each building carries:
-- **EGID** — links to GWR attributes
-- **FID** — cadastral survey feature ID
-- **area_official_m2** — official area from source (if present), kept for reference
+Loads building polygons and resolves identifiers. For `--geojson` mode, input coordinates are spatially matched to AV building polygons (point-in-polygon containment).
+
+Each building carries:
+- **input_id** / **input_egid** / **input_lon** / **input_lat** — preserved from input for traceability
+- **egid** — authoritative EGID from the AV (`GWR_EGID`), used for GWR lookups
 - **area_footprint_m2** — always computed from `polygon.area` for consistency
 
 All geometries are transformed to LV95 (EPSG:2056).
-
-| Input mode | Flag | Accepts |
-|------------|------|---------|
-| Geodata file | `--footprints` | `.gpkg`, `.shp`, `.geojson` — auto-filters to buildings if type column present |
-| Coordinates | `--coordinates` | CSV with `lon`, `lat` (optionally `egid`, `fid`) — each point is buffered into a 10×10 m polygon for elevation sampling |
 
 ### Step 2 — Aligned 1×1m Grid
 
@@ -262,20 +256,22 @@ Samples two elevation values at each grid point:
 **Volume calculation:**
 
 ```
-base_height     = min(terrain)                         # lowest ground under building
-building_height = max(surface − base_height, 0)        # per grid point
-volume          = Σ(building_heights) × 1m²
+elevation_base_m = min(terrain at all grid points)     # lowest ground point under footprint
+building_height  = max(surface − elevation_base_m, 0)  # per grid point, clamped to ≥ 0
+volume           = Σ(building_heights) × 1m²
 ```
 
-**Derived height metrics:**
+`elevation_base_m` is the single lowest DTM value sampled across all 1×1m grid points within the footprint. It serves as the reference plane: all building heights are measured from this point upward. This means a building on a slope will have its volume measured from the lowest corner of the foundation, which is conservative (slightly overestimates on steep terrain).
 
-| Metric | Formula | Purpose |
+**Derived metrics:**
+
+| Metric | Formula | Meaning |
 |--------|---------|---------|
-| `height_mean_m` | mean(building_heights) | Average height across grid |
-| `height_max_m` | max(building_heights) | Tallest point |
-| `height_minimal_m` | volume / footprint | Equivalent uniform box height — best for floor estimation on complex shapes |
-| `elevation_base_m` | min(terrain) | Lowest ground point |
-| `elevation_roof_base_m` | min(surface) | Estimated eave / roof base elevation |
+| `elevation_base_m` | min(terrain) | Lowest ground elevation under footprint (m asl) |
+| `elevation_roof_base_m` | min(surface) | Lowest surface elevation in footprint — estimated eave (m asl) |
+| `height_mean_m` | mean(surface − base) | Average building height above base (m) |
+| `height_max_m` | max(surface − base) | Maximum building height — ridge (m) |
+| `height_minimal_m` | volume / footprint area | Equivalent uniform box height (m) — best for floor estimation on complex shapes |
 
 ### Step 4 — Floor Area Estimation (optional)
 
@@ -301,34 +297,38 @@ Uses `height_minimal_m` (volume / footprint) rather than `height_mean_m` — it 
 
 ### Always included (Steps 1–3)
 
-| Column | Source | Description |
-|--------|--------|-------------|
-| `egid` | AV | Federal building identifier |
-| `fid` | AV | Cadastral survey feature ID |
-| `area_footprint_m2` | Geometry | Footprint area computed from polygon (m²) |
-| `area_official_m2` | AV | Official area attribute from source data (m², if available) |
-| `volume_above_ground_m3` | DTM + DSM | Above-ground volume (m³) |
-| `elevation_base_m` | DTM | Min terrain elevation (m, LV95) |
-| `elevation_roof_base_m` | DSM | Min surface elevation — est. eave (m, LV95) |
-| `height_mean_m` | DTM + DSM | Mean building height (m) |
-| `height_max_m` | DTM + DSM | Max building height (m) |
-| `height_minimal_m` | Derived | volume / footprint (m) |
-| `grid_points_count` | — | Valid elevation sample points |
-| `status` | — | `success` / `no_grid_points` / `no_height_data` / `error` |
+| Column | Status | Source | Description |
+|--------|:------:|--------|-------------|
+| `input_id` | MUST | Input | User-provided identifier (e.g. `bbl_id` from GeoJSON) |
+| `input_egid` | OPTIONAL | Input | EGID from input data (reference only, not used for matching) |
+| `input_lon` | MUST | Input | Original WGS84 longitude |
+| `input_lat` | MUST | Input | Original WGS84 latitude |
+| `egid` | MUST | AV | Authoritative federal building ID from AV (`GWR_EGID`) |
+| `fid` | OPTIONAL | AV | Cadastral survey feature ID |
+| `area_footprint_m2` | MUST | Geometry | Footprint area computed from polygon (m²) |
+| `area_official_m2` | OPTIONAL | AV | Official area attribute from source data (m²) |
+| `volume_above_ground_m3` | MUST | DTM + DSM | Above-ground volume (m³) |
+| `elevation_base_m` | MUST | DTM | Lowest terrain elevation under footprint (m asl). Used as reference plane for all height calculations. |
+| `elevation_roof_base_m` | MUST | DSM | Lowest surface elevation within footprint — estimated eave height (m asl) |
+| `height_mean_m` | MUST | DTM + DSM | Mean building height above base (m) |
+| `height_max_m` | MUST | DTM + DSM | Maximum building height above base (m) — ridge |
+| `height_minimal_m` | MUST | Derived | volume / footprint area (m) — equivalent uniform box height |
+| `grid_points_count` | MUST | — | Number of valid elevation sample points |
+| `status` | MUST | — | `success` / `no_building_at_point` / `no_grid_points` / `no_height_data` / `error` |
 
 ### With `--estimate-area` (Step 4)
 
-| Column | Source | Description |
-|--------|--------|-------------|
-| `gkat` | GWR | Building category code |
-| `gklas` | GWR | Building class code |
-| `gbauj` | GWR | Construction year |
-| `gastw` | GWR | Number of stories (GWR value) |
-| `area_floor_total_m2` | Derived | Gross floor area (m²) |
-| `floors_estimated` | Derived | Estimated floor count |
-| `floor_height_used_m` | Derived | Floor height applied (m) |
-| `building_type` | GWR | Building type description |
-| `area_accuracy` | Derived | `high` / `medium` / `low` |
+| Column | Status | Source | Description |
+|--------|:------:|--------|-------------|
+| `gkat` | OPTIONAL | GWR | Building category code |
+| `gklas` | OPTIONAL | GWR | Building class code |
+| `gbauj` | OPTIONAL | GWR | Construction year |
+| `gastw` | OPTIONAL | GWR | Number of stories (GWR value) |
+| `area_floor_total_m2` | MUST | Derived | Gross floor area (m²) |
+| `floors_estimated` | MUST | Derived | Estimated floor count |
+| `floor_height_used_m` | MUST | Derived | Floor height applied (m) |
+| `building_type` | OPTIONAL | GWR | Building type description |
+| `area_accuracy` | MUST | Derived | `high` / `medium` / `low` |
 
 ### Accuracy levels
 
@@ -396,6 +396,76 @@ EG = Erdgeschoss (ground floor), RG = Regelgeschoss (upper floors).
 
 ---
 
+## OGD Data Source Mapping
+
+Mapping of pipeline fields to their Open Government Data (OGD) sources.
+
+### Amtliche Vermessung — `lcsf` layer (Bodenbedeckung)
+
+| Pipeline field | AV attribute | OGD model | Description |
+|---------------|-------------|-----------|-------------|
+| `egid` | `GWR_EGID` | DM.01-AV-CH / `Bodenbedeckung.BoFlaeche` | Federal building identifier (links to GWR) |
+| `area_footprint_m2` | — (computed from `geometry`) | `Bodenbedeckung.BoFlaeche.Geometrie` | Footprint area in m² |
+| `area_official_m2` | `flaeche` / `area` / `shape_area` | `Bodenbedeckung.BoFlaeche` | Official area from source (if present) |
+| Building filter | `Art = 'Gebaeude'` | `Bodenbedeckung.BoFlaeche_Art` | Bodenbedeckungsart / land cover type |
+| Municipality | `BFSNr` | BFS municipality code | Used for spatial grouping |
+| Canton | `Kanton` | Canton abbreviation (2 chars) | — |
+| Data quality | `Qualitaet` | `AV93` / `AV04` etc. | Survey quality level |
+
+> **Source:** [geodienste.ch/services/av](https://www.geodienste.ch/services/av) — GeoPackage format with `lcsf` layer
+> **Data model:** [DM.01-AV-CH](https://www.cadastre-manual.admin.ch/de/datenmodell-der-amtlichen-vermessung-dm01-av-ch) — INTERLIS topic `Bodenbedeckung`
+> **STAC collection:** `ch.swisstopo.amtliches-strassenverzeichnis` (related)
+
+### swissALTI3D — Terrain elevation
+
+| Pipeline field | Tile attribute | OGD identifier | Description |
+|---------------|---------------|----------------|-------------|
+| `elevation_base_m` | Band 1 (elevation) | — | Sampled at grid points within footprint |
+| Tile ID | Filename: `swissalti3d_{YYYY}_{XXXX-YYYY}_0.5_2056_5728.tif` | — | 1 km² tiles, SW corner in LV95 (km) |
+
+> **STAC collection:** [`ch.swisstopo.swissalti3d`](https://data.geo.admin.ch/api/stac/v1/collections/ch.swisstopo.swissalti3d)
+> **Asset key:** `swissalti3d_{year}_{tile}_0.5_2056_5728.tif` — 0.5 m resolution, EPSG:2056 + LN02 (EPSG:5728)
+> **Direct URL pattern:** `https://data.geo.admin.ch/ch.swisstopo.swissalti3d/swissalti3d_{YYYY}_{TILE}/swissalti3d_{YYYY}_{TILE}_0.5_2056_5728.tif`
+
+### swissSURFACE3D Raster — Surface elevation
+
+| Pipeline field | Tile attribute | OGD identifier | Description |
+|---------------|---------------|----------------|-------------|
+| `elevation_roof_base_m` | Band 1 (elevation) | — | Sampled at grid points within footprint |
+| Tile ID | Filename: `swisssurface3d-raster_{YYYY}_{XXXX-YYYY}_0.5_2056_5728.tif` | — | 1 km² tiles, SW corner in LV95 (km) |
+
+> **STAC collection:** [`ch.swisstopo.swisssurface3d-raster`](https://data.geo.admin.ch/api/stac/v1/collections/ch.swisstopo.swisssurface3d-raster)
+> **Asset key:** `swisssurface3d-raster_{year}_{tile}_0.5_2056_5728.tif` — 0.5 m resolution, EPSG:2056 + LN02 (EPSG:5728)
+> **Direct URL pattern:** `https://data.geo.admin.ch/ch.swisstopo.swisssurface3d-raster/swisssurface3d-raster_{YYYY}_{TILE}/swisssurface3d-raster_{YYYY}_{TILE}_0.5_2056_5728.tif`
+
+### GWR — Building classification
+
+| Pipeline field | GWR attribute | Catalog code | Description |
+|---------------|-------------|--------------|-------------|
+| `gkat` | `GKAT` | [9.3.7](https://www.housing-stat.ch/catalog/en/4.3/final/9.3.7.html) | Building category (1010–1080) |
+| `gklas` | `GKLAS` | [9.3.8](https://www.housing-stat.ch/catalog/en/4.3/final/9.3.8.html) | Building class (1110–1274) |
+| `gbauj` | `GBAUJ` | [9.3.12](https://www.housing-stat.ch/catalog/en/4.3/final/9.3.12.html) | Construction year |
+| `gastw` | `GASTW` | [9.3.13](https://www.housing-stat.ch/catalog/en/4.3/final/9.3.13.html) | Number of stories |
+| Lookup key | `EGID` | [9.3.1](https://www.housing-stat.ch/catalog/en/4.3/final/9.3.1.html) | Federal building identifier |
+
+> **Source:** [housing-stat.ch/data](https://www.housing-stat.ch/de/data/supply/public.html) (CSV bulk) or [swisstopo API](https://docs.geo.admin.ch/access-data/search.html)
+> **Catalog:** [GWR v4.3](https://www.housing-stat.ch/catalog/en/4.3/final)
+> **API layer:** `ch.bfs.gebaeude_wohnungs_register`
+
+### STAC API
+
+All swisstopo elevation data is accessible via the [STAC API v1](https://data.geo.admin.ch/api/stac/v1/):
+
+| Endpoint | URL |
+|----------|-----|
+| Root | `https://data.geo.admin.ch/api/stac/v1/` |
+| Collections | `https://data.geo.admin.ch/api/stac/v1/collections` |
+| Search | `https://data.geo.admin.ch/api/stac/v1/search?collections={id}&bbox={W,S,E,N}` |
+| Browser | [data.geo.admin.ch/browser](https://data.geo.admin.ch/browser/) |
+| Docs | [geo.admin.ch/de/rest-schnittstelle-stac-api](https://www.geo.admin.ch/de/rest-schnittstelle-stac-api/) |
+
+---
+
 ## Project Structure
 
 ```
@@ -405,12 +475,12 @@ area-estimator/
 │   ├── footprints.py                     Step 1: load footprints / coordinates
 │   ├── grid.py                           Step 2: aligned 1×1m grid
 │   ├── volume.py                         Step 3: elevation sampling & volume
+│   ├── tile_fetcher.py                   On-demand tile download from swisstopo
 │   ├── gwr.py                            GWR lookup (CSV + API)
 │   ├── area.py                           Step 4: floor area estimation
 │   └── requirements.txt
 ├── fme/                              ← FME workbench (same as python, requires license)
 ├── plugins/
-│   ├── tile-downloader/              ← batch download swisstopo GeoTIFF tiles
 │   ├── roof-estimator/               ← roof shape analysis from 3D meshes
 │   └── biodiversity-estimator/       ← biodiversity metrics (planned)
 ├── legacy/                            ← original implementations (reference)
@@ -419,6 +489,7 @@ area-estimator/
 │   ├── base-worker/
 │   └── swisstopo3d-volume_DEPRECATED/
 ├── data/                              ← .gitignored
+│   ├── output/                           pipeline results CSV + logs
 │   ├── gwr/                              GWR CSV download
 │   ├── swissalti3d/                      terrain tiles
 │   └── swisssurface3d/                   surface tiles
@@ -433,7 +504,9 @@ area-estimator/
 |----------|------|
 | Amtliche Vermessung | [geodienste.ch/services/av](https://www.geodienste.ch/services/av) |
 | swissALTI3D | [swisstopo.admin.ch](https://www.swisstopo.admin.ch/de/hoehenmodell-swissalti3d) |
-| swissSURFACE3D | [swisstopo.admin.ch](https://www.swisstopo.admin.ch/de/hoehenmodell-swisssurface3d-raster) |
+| swissSURFACE3D Raster | [swisstopo.admin.ch](https://www.swisstopo.admin.ch/de/hoehenmodell-swisssurface3d-raster) |
+| swisstopo STAC API | [data.geo.admin.ch/api/stac/v1](https://data.geo.admin.ch/api/stac/v1/) |
+| STAC API Docs | [geo.admin.ch/de/rest-schnittstelle-stac-api](https://www.geo.admin.ch/de/rest-schnittstelle-stac-api/) |
 | swisstopo Search API | [docs.geo.admin.ch](https://docs.geo.admin.ch/access-data/search.html) |
 | GWR | [housing-stat.ch](https://www.housing-stat.ch/de/index.html) |
 | GWR Public Data | [housing-stat.ch/data](https://www.housing-stat.ch/de/data/supply/public.html) |

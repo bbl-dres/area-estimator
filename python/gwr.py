@@ -13,12 +13,15 @@ The CSV method is preferred for batch processing. The API is a fallback for
 small numbers of buildings or when no CSV is available.
 """
 
-import sys
 import json
+import logging
+import sys
 import time
 import urllib.request
 import urllib.error
 import pandas as pd
+
+log = logging.getLogger(__name__)
 
 
 # Columns we need from the GWR CSV
@@ -44,7 +47,7 @@ def load_gwr_from_csv(csv_path):
     Returns:
         DataFrame indexed by EGID with columns: gkat, gklas, gbauj, gastw
     """
-    print(f"Loading GWR data from {csv_path}...")
+    log.info(f"Loading GWR data from {csv_path}...")
 
     df = pd.read_csv(csv_path, sep=';', dtype=str, low_memory=False)
 
@@ -68,7 +71,7 @@ def load_gwr_from_csv(csv_path):
     df['egid'] = df['egid'].astype(int)
     df = df.set_index('egid')
 
-    print(f"  Loaded {len(df)} buildings from GWR CSV")
+    log.info(f"  Loaded {len(df)} buildings from GWR CSV")
     return df
 
 
@@ -133,7 +136,7 @@ def query_gwr_api(egid):
         result['gastw'] = feature_attrs.get('gastw')
 
     except (urllib.error.URLError, json.JSONDecodeError, KeyError) as e:
-        print(f"Warning: GWR API query failed for EGID {egid}: {e}", file=sys.stderr)
+        log.debug(f"GWR API query failed for EGID {egid}: {e}")
 
     return result
 
@@ -160,7 +163,7 @@ def enrich_with_gwr(buildings_df, gwr_csv_path=None):
             df[col] = None
 
     if 'egid' not in df.columns:
-        print("Warning: No EGID column — skipping GWR enrichment", file=sys.stderr)
+        log.warning("No EGID column — skipping GWR enrichment")
         return df
 
     egids_available = df['egid'].notna()
@@ -180,20 +183,19 @@ def enrich_with_gwr(buildings_df, gwr_csv_path=None):
         df.drop(columns=['_egid_int'], inplace=True)
 
         matched = df.loc[egids_available, 'gkat'].notna().sum()
-        print(f"  GWR CSV: matched {matched}/{egids_available.sum()} buildings")
+        log.info(f"  GWR CSV: matched {matched}/{egids_available.sum()} buildings")
 
     else:
         # API fallback — query individually with rate limiting
         api_count = egids_available.sum()
         if api_count > 100:
-            print(f"Warning: Querying {api_count} buildings via API. "
-                  f"Consider using --gwr-csv for bulk processing.", file=sys.stderr)
+            log.warning(f"Querying {api_count} buildings via API. "
+                        f"Consider using --gwr-csv for bulk processing.")
 
         matched = 0
         for i, idx in enumerate(df.index[egids_available]):
             egid = int(df.at[idx, 'egid'])
-            print(f"  GWR API: querying {i + 1}/{api_count} (EGID {egid})",
-                  end='\r', flush=True)
+            log.info(f"  GWR API: [{i + 1}/{api_count}] EGID {egid}")
             result = query_gwr_api(egid)
             for col in ['gkat', 'gklas', 'gbauj', 'gastw']:
                 if result[col] is not None:
@@ -202,6 +204,6 @@ def enrich_with_gwr(buildings_df, gwr_csv_path=None):
                 matched += 1
             time.sleep(0.1)
 
-        print(f"\n  GWR API: matched {matched}/{api_count} buildings")
+        log.info(f"  GWR API: matched {matched}/{api_count} buildings")
 
     return df

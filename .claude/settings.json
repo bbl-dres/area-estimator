@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:data.geo.admin.ch)",
+      "WebFetch(domain:groups.google.com)",
+      "Bash(python -c \":*)",
+      "Bash(ls \"D:/SwissAlti3D/\"*.tif)",
+      "Bash(pip install geopandas fiona shapely rasterio)",
+      "Read(//d/swissSURFACE3D Raster/**)",
+      "Bash(ls \"D:/swissSURFACE3D Raster/\"*.tif)",
+      "Bash(python test_bbl.py)",
+      "Bash(python test_bbl.py --limit 5)",
+      "Bash(python test_bbl.py --limit 10)",
+      "Bash(pip install requests)",
+      "Bash(python main.py --geojson \"../data/BBL Adressen Bereinigt.geojson\" --av \"D:/AV_lv95/av_2056.gpkg\" --alti3d \"D:/SwissAlti3D\" --surface3d \"D:/swissSURFACE3D Raster\" --auto-fetch --limit 10 -o \"../data/output/bbl_volumes.csv\")",
+      "Bash(python -c \"import json; data=json.load\\(open\\(''data/BBL Adressen Bereinigt.geojson'',''r'',encoding=''utf-8''\\)\\); print\\(f''{len\\(data[\"\"features\"\"]\\)} features''\\); print\\(json.dumps\\(data[''features''][0], indent=2, ensure_ascii=False\\)\\)\")",
+      "Bash(python main.py --geojson \"../data/BBL Adressen Bereinigt.geojson\" --av \"D:/AV_lv95/av_2056.gpkg\" --alti3d \"D:/SwissAlti3D\" --surface3d \"D:/swissSURFACE3D Raster\" --auto-fetch -o \"../data/output/bbl_results.csv\")",
+      "Read(//c/Users/DAVIDR~1/AppData/Local/Temp/claude/c--Users-DavidRasner-Documents-GitHub-area-estimator/tasks/**)",
+      "Bash(tasklist //FI \"IMAGENAME eq python.exe\")",
+      "Bash(ls -lt /c/Users/DavidRasner/Documents/GitHub/area-estimator/data/output/run_*.log)",
+      "Bash(taskkill //F //PID 84372)",
+      "Bash(taskkill //F //PID 68568)",
+      "Bash(taskkill //F //IM python.exe)",
+      "Bash(python main.py --geojson \"../data/BBL Adressen Bereinigt.geojson\" --av \"D:/AV_lv95/av_2056.gpkg\" --alti3d \"D:/SwissAlti3D\" --surface3d \"D:/swissSURFACE3D Raster\" --auto-fetch -o \"../data/output/bbl_test.csv\" -l 5)",
+      "Bash(python python/main.py --geojson \"data/BBL Adressen Bereinigt.geojson\" --av \"D:/AV_lv95/av_2056.gpkg\" --alti3d \"D:/SwissAlti3D\" --surface3d \"D:/swissSURFACE3D Raster\" --auto-fetch)",
+      "Bash(python3 -c \"from pathlib import Path; p = Path\\(''D:/SwissAlti3D''\\); print\\(list\\(p.glob\\(''*_2556-1114_*.tif''\\)\\)\\)\")",
+      "Bash(python3 -c \":*)",
+      "Bash(python python/main.py --geojson \"data/BBL Adressen Bereinigt.geojson\" --av \"D:/AV_lv95/av_2056.gpkg\" --alti3d \"D:/SwissAlti3D\" --surface3d \"D:/swissSURFACE3D Raster\")"
+    ]
+  }
+}
