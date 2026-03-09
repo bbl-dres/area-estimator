@@ -88,8 +88,9 @@ pip install -r python/requirements.txt
 ### Example 1 — Estimate volumes for a list of buildings (CSV)
 
 You have a CSV with building coordinates (e.g. exported from a portfolio system).
-The tool buffers each point into a 10x10 m sampling polygon, fetches the elevation
-tiles it needs, and outputs volume and height metrics:
+The tool buffers each point into a 10×10 m footprint, divides it into a 1×1 m grid,
+and samples terrain (DTM) and surface (DSM) elevations at each cell to calculate
+above-ground volume and height metrics:
 
 ```csv
 id,lon,lat,egid
@@ -235,7 +236,7 @@ Generates a building-oriented 1×1m sampling grid aligned to the minimum rotated
 
 ### Step 3 — Volume & Heights
 
-Samples DTM and DSM elevations at each grid point to compute above-ground volume and height metrics.
+Samples DTM (terrain) and DSM (surface) elevations at each 1×1 m grid cell. The above-ground height at each cell is `max(surface − terrain, 0)`, and volume is the sum of all cell heights.
 
 | Column | Format | Required | Source | Description |
 |--------|--------|:--------:|--------|-------------|
