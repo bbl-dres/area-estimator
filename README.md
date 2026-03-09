@@ -33,7 +33,7 @@ flowchart TD
 
     S1["<b>Step 1 — Read Footprints</b><br>CSV: buffer points to 10×10 m<br>Reprojected to LV95"]
     S2["<b>Step 2 — Aligned 1×1m Grid</b><br>Minimum rotated rectangle orientation<br>Grid points filtered to footprint"]
-    S3["<b>Step 3 — Volume & Heights</b><br>Sample DTM + DSM at each point<br>Volume = Σ max(surface_i − min(terrain), 0) × 1m²"]
+    S3["<b>Step 3 — Volume & Heights</b><br>Sample DTM + DSM at each point<br>Volume = Σ max(surface_i − terrain_i, 0) × 1m²"]
     S4["<b>Step 4 — Floor Areas</b> <i>(optional)</i><br>GWR classification → floor height<br>Floors = height_minimal / floor_height<br>GFA = footprint × floors"]
 
     S1 --> S2 --> S3 --> S4
@@ -132,7 +132,7 @@ All results are written to a single CSV file (`result_<timestamp>.csv`).
 
 Buffers CSV coordinates into 10×10 m sampling polygons and reprojects to LV95 (EPSG:2056).
 
-Input columns are preserved in the output with `input_` prefix: `input_id`, `input_lon`, `input_lat`.
+The `id` column from the CSV is preserved in the output. The `egid` column (if present) is mapped to `av_egid`.
 
 | Column | Format | Required | Source | Description |
 |--------|--------|:--------:|--------|-------------|
@@ -153,8 +153,8 @@ Samples DTM and DSM elevations at each grid point to compute above-ground volume
 
 | Column | Format | Required | Source | Description |
 |--------|--------|:--------:|--------|-------------|
-| `volume_above_ground_m3` | float | yes | DTM + DSM | Above-ground volume: `Σ max(surface_i − min(terrain), 0) × 1m²` |
-| `elevation_base_m` | float | yes | DTM | Lowest terrain point under footprint (m asl) — height reference |
+| `volume_above_ground_m3` | float | yes | DTM + DSM | Above-ground volume: `Σ max(surface_i − terrain_i, 0) × 1m²` |
+| `elevation_base_m` | float | yes | DTM | Lowest terrain point under footprint (m asl) — reference datum |
 | `elevation_roof_base_m` | float | yes | DSM | Lowest surface point in footprint — estimated eave (m asl) |
 | `height_mean_m` | float | yes | DTM + DSM | Mean building height above base (m) |
 | `height_max_m` | float | yes | DTM + DSM | Max building height above base — ridge (m) |
