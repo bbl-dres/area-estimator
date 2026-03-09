@@ -1,5 +1,36 @@
-# Local data directories (large raster tiles and CSV downloads)
+# Local data directories (large raster tiles, CSV downloads, AV files)
 data/
+
+# Output files and logs (anywhere in repo)
+*.log
+output/
+results*.csv
+result_*.csv
+
+# Elevation tiles
+*.tif
+*.tiff
+
+# Geodata files (large, should not be in repo)
+*.gpkg
+*.shp
+*.shx
+*.dbf
+*.prj
+*.cpg
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.swp
+
+# Environment / secrets
+.env
+.env.*
+*.key
+*.pem
+credentials.*
 
 # Python
 __pycache__/
