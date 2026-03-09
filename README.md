@@ -175,7 +175,7 @@ Samples DTM and DSM elevations at each grid point to compute above-ground volume
 
 | Column | Format | Status | Source | Description |
 |--------|--------|:------:|--------|-------------|
-| `volume_above_ground_m3` | float | MUST | DTM + DSM | Above-ground volume: `Σ max(surface − base, 0) × 1m²` |
+| `volume_above_ground_m3` | float | MUST | DTM + DSM | Above-ground volume: `Σ max(surface_i − min(terrain), 0) × 1m²` |
 | `elevation_base_m` | float | MUST | DTM | Lowest terrain point under footprint (m asl) — height reference |
 | `elevation_roof_base_m` | float | MUST | DSM | Lowest surface point in footprint — estimated eave (m asl) |
 | `height_mean_m` | float | MUST | DTM + DSM | Mean building height above base (m) |
