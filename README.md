@@ -408,9 +408,11 @@ area-estimator/
 │   ├── gwr.py                            GWR lookup (CSV + API)
 │   ├── area.py                           Step 4: floor area estimation
 │   └── requirements.txt
+├── fme/                              ← FME workbench (same as python, requires license)
 ├── plugins/
-│   ├── roof-estimator/                ← roof shape analysis from 3D meshes
-│   └── biodiversity-estimator/        ← biodiversity metrics (planned)
+│   ├── tile-downloader/              ← batch download swisstopo GeoTIFF tiles
+│   ├── roof-estimator/               ← roof shape analysis from 3D meshes
+│   └── biodiversity-estimator/       ← biodiversity metrics (planned)
 ├── legacy/                            ← original implementations (reference)
 │   ├── volume-estimator/
 │   ├── area-estimator/
