@@ -151,12 +151,15 @@ All results are written to a single CSV file (`result_<timestamp>.csv`).
 
 Resolves building polygons from [Amtliche Vermessung](https://www.geodienste.ch/services/av) and reprojects to LV95 (EPSG:2056).
 
+Input columns are preserved in the output with `input_` prefix: `input_id`, `input_egid`, `input_lon`, `input_lat`.
+
 | Column | Format | Status | Source | Description |
 |--------|--------|:------:|--------|-------------|
-| `egid` | integer | OPTIONAL | AV / Input | Federal building ID — from AV (`GWR_EGID`) or input data; `None` if unavailable |
-| `fid` | integer | MUST | AV / Input | Feature ID — from GeoPackage or input data; defaults to row index if missing |
+| `egid` | integer | OPTIONAL | AV | Federal building ID (`GWR_EGID`); `None` if unavailable |
+| `fid` | integer | MUST | AV | Feature ID from GeoPackage; defaults to row index |
 | `area_footprint_m2` | float | MUST | Computed | Footprint area from polygon geometry (m²) |
 | `area_official_m2` | float | OPTIONAL | AV | Official area from source attribute (m²) |
+| `status` | string | MUST | Computed | `ok` / `no_building_at_point` |
 
 ### Step 2 — Grid
 
@@ -179,7 +182,7 @@ Samples DTM and DSM elevations at each grid point to compute above-ground volume
 | `height_max_m` | float | MUST | DTM + DSM | Max building height above base — ridge (m) |
 | `height_minimal_m` | float | MUST | Computed | `volume / footprint_area` — equivalent uniform box height (m) |
 | `grid_points_count` | integer | MUST | Computed | Number of valid elevation sample points |
-| `status` | string | MUST | Computed | `success` / `no_building_at_point` / `no_grid_points` / `no_height_data` / `error` |
+| `status` | string | MUST | Computed | `success` / `no_grid_points` / `no_height_data` / `error` |
 
 ### Step 4 — Floor Areas _(optional, `--estimate-area`)_
 
