@@ -229,8 +229,6 @@ area-estimator/
 
 ## Floor Height Lookup
 
-Canton Zurich methodology (Seiler & Seiler, 2020). GF = ground floor, UF = upper floors.
-
 | Code | Building Type | Schema | GF (m) | UF (m) |
 |------|---------------|--------|--------|--------|
 | 1010 | Provisional shelter | GKAT | 2.70–3.30 | 2.70–3.30 |
