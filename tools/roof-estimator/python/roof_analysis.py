@@ -179,7 +179,7 @@ def classify_roof_shape(sloped_faces, horizontal_roof_faces, building_height, fo
         if azimuth_diff > 180:
             azimuth_diff = 360 - azimuth_diff
 
-        if 150 < azimuth_diff < 210:  # Roughly opposite directions
+        if azimuth_diff > 150:  # Roughly opposite directions (max is 180 after normalization)
             result['roof_shape'] = 'gable'
             result['roof_shape_confidence'] = 0.85
             # Ridge orientation is perpendicular to the slope directions

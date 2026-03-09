@@ -15,12 +15,12 @@ Outputs per building:
 """
 
 import logging
-import sys
 from pathlib import Path
 import numpy as np
 import rasterio
 
 from grid import create_aligned_grid_points
+from tile_fetcher import tile_ids_from_bounds
 
 log = logging.getLogger(__name__)
 
@@ -87,17 +87,7 @@ class TileIndex:
 
     def get_required_tiles(self, bounds):
         """Get list of tile IDs covering a bounding box in LV95 coordinates."""
-        minx, miny, maxx, maxy = bounds
-        min_tile_x = int(minx / 1000)
-        min_tile_y = int(miny / 1000)
-        max_tile_x = int(maxx / 1000)
-        max_tile_y = int(maxy / 1000)
-
-        tiles = []
-        for x in range(min_tile_x, max_tile_x + 1):
-            for y in range(min_tile_y, max_tile_y + 1):
-                tiles.append(f"{x:04d}-{y:04d}")
-        return tiles
+        return sorted(tile_ids_from_bounds(bounds))
 
     def sample_heights(self, points, tiles, model_type):
         """
@@ -170,7 +160,7 @@ class TileIndex:
                     if '-' in tile_id and tile_id not in tile_index:
                         tile_index[tile_id] = filepath
                         new_count += 1
-            except Exception:
+            except (OSError, ValueError):
                 pass
         return new_count
 
@@ -240,14 +230,16 @@ def calculate_building_volume(polygon, tile_index, av_egid=None, fid=None,
             return {**empty_result, 'grid_points_count': len(grid_points),
                     'status_step3': 'no_height_data'}
 
-        # Base height = lowest terrain point under building
+        # Base height = lowest terrain point under building (for reference)
         base_height = np.min(valid_terrain)
 
         # Roof base = lowest surface point within footprint (estimated eave)
         roof_base = np.min(valid_surface)
 
-        # Building heights relative to base (clamp negatives to 0)
-        building_heights = np.maximum(valid_surface - base_height, 0)
+        # Building heights: per-point difference between surface and terrain
+        # This correctly handles sloped terrain by computing the true
+        # above-ground height at each grid cell
+        building_heights = np.maximum(valid_surface - valid_terrain, 0)
 
         # Volume = sum of heights × cell area
         volume = np.sum(building_heights) * (voxel_size ** 2)

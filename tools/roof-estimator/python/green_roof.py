@@ -1,6 +1,4 @@
 
-import os
-import glob
 import logging
 import numpy as np
 import rasterio
@@ -114,13 +112,7 @@ class GreenRoofAnalyzer:
             # Assuming it's a GeoJSON geometry object
              try:
                 geom = shapely.geometry.shape(building_geometry_mapping)
-             except:
-                # If it's the raw properties from GDB with _vertices, we might need
-                # to reconstruct the polygon. However, main.py passes the raw read
-                # which usually contains 'geometry' key if it's from fiona.
-                # BUT, the processed dict in main.py has `_vertices` and `_faces`.
-                # We need the 2D footprint for raster analysis.
-                # Let's handle the case where we pass a polygon created from footprint.
+             except (ValueError, TypeError, KeyError):
                 return {'error': 'Invalid geometry input'}
         else:
             geom = building_geometry_mapping

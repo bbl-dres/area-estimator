@@ -19,6 +19,7 @@ import geopandas as gpd
 import pandas as pd
 from pyproj import Transformer
 from shapely.geometry import Point, box
+from shapely.strtree import STRtree
 
 log = logging.getLogger(__name__)
 
@@ -97,9 +98,9 @@ def load_coordinates_from_csv(csv_path, limit=None):
     Load WGS84 coordinates from CSV and buffer into 10x10m sampling polygons.
 
     Required columns: lon, lat, id
-    Optional columns: egid
+    Optional columns: egid (mapped to av_egid)
 
-    Returns GeoDataFrame in LV95 with columns: id, egid, area_official_m2, geometry, status
+    Returns GeoDataFrame in LV95 with columns: id, av_egid, area_official_m2, geometry, status_step1
     """
     filepath = Path(csv_path)
     log.info(f"Loading coordinates from {filepath.name}...")
@@ -115,8 +116,10 @@ def load_coordinates_from_csv(csv_path, limit=None):
     if missing:
         raise ValueError(f"CSV missing required columns: {missing}. Found: {list(df.columns)}")
 
-    if 'egid' not in df.columns:
-        df['egid'] = None
+    if 'egid' in df.columns:
+        df = df.rename(columns={'egid': 'av_egid'})
+    else:
+        df['av_egid'] = None
 
     if limit:
         df = df.head(limit)
@@ -134,44 +137,47 @@ def load_coordinates_from_csv(csv_path, limit=None):
     gdf['status_step1'] = 'ok'
 
     log.info(f"Loaded {len(gdf)} coordinates (buffered to {POINT_BUFFER_M*2}x{POINT_BUFFER_M*2}m)")
-    return gdf[['id', 'egid', 'area_official_m2', 'geometry', 'status_step1']]
+    return gdf[['id', 'av_egid', 'area_official_m2', 'geometry', 'status_step1']]
 
 
-def _find_av_building_at_point(lon, lat, av_path, av_layer):
+def _load_av_buildings(av_path, av_layer, bbox=None):
     """
-    Find the AV building polygon that contains a WGS84 point.
+    Load AV building polygons once and build a spatial index.
 
-    Transforms the point to LV95, queries the AV GeoPackage within a 200m bbox,
-    and returns the building polygon that spatially contains the point.
-
-    Returns (polygon, av_egid, av_fid) or (None, None, None) if no building found.
+    Returns (GeoDataFrame of buildings, STRtree index) or (None, None) on error.
     """
-    x, y = _wgs84_to_lv95.transform(lon, lat)
-    pt = Point(x, y)
-
-    bbox = (x - AV_SEARCH_BUFFER_M, y - AV_SEARCH_BUFFER_M,
-            x + AV_SEARCH_BUFFER_M, y + AV_SEARCH_BUFFER_M)
-
     try:
         gdf = gpd.read_file(av_path, layer=av_layer, bbox=bbox,
                             engine='pyogrio', fid_as_index=True)
-    except Exception:
-        return None, None, None
+    except (IOError, ValueError) as e:
+        log.error(f"Failed to read AV file: {e}")
+        return None, None
 
     if len(gdf) == 0:
-        return None, None, None
+        return None, None
 
-    buildings = gdf[gdf["Art"] == "Gebaeude"]
+    buildings = gdf[gdf["Art"] == "Gebaeude"].copy()
     if len(buildings) == 0:
-        return None, None, None
+        return None, None
 
-    # Find which building contains the point
-    contains = buildings[buildings.geometry.contains(pt)]
-    if len(contains) == 0:
-        return None, None, None
+    tree = STRtree(buildings.geometry.values)
+    return buildings, tree
 
-    hit = contains.iloc[0]
-    return hit.geometry, hit["GWR_EGID"], contains.index[0]
+
+def _find_av_building_at_point(pt, av_buildings, av_tree):
+    """
+    Find the AV building polygon that contains an LV95 point using a spatial index.
+
+    Returns (polygon, av_egid, av_fid) or (None, None, None) if no building found.
+    """
+    indices = av_tree.query(pt)
+    for idx in indices:
+        geom = av_buildings.geometry.iloc[idx]
+        if geom.contains(pt):
+            row = av_buildings.iloc[idx]
+            return geom, row["GWR_EGID"], av_buildings.index[idx]
+
+    return None, None, None
 
 
 def load_geojson_with_av(geojson_path, av_path, av_layer="lcsf", limit=None):
@@ -188,7 +194,8 @@ def load_geojson_with_av(geojson_path, av_path, av_layer="lcsf", limit=None):
     The authoritative EGID comes from the AV (GWR_EGID attribute).
 
     Returns GeoDataFrame in LV95 with columns:
-        input_id, input_egid, av_egid, fid, area_official_m2, geometry, status
+        input_id, input_egid, input_lon, input_lat,
+        av_egid, fid, area_official_m2, geometry, status_step1
     """
     log.info(f"Loading GeoJSON from {Path(geojson_path).name}...")
 
@@ -202,15 +209,53 @@ def load_geojson_with_av(geojson_path, av_path, av_layer="lcsf", limit=None):
     total = len(features)
     log.info(f"  {total} features, resolving footprints from AV...")
 
+    # Compute bounding box of all input points to load AV data once
+    lons = []
+    lats = []
+    for feat in features:
+        coords = feat.get("geometry", {}).get("coordinates", [])
+        if len(coords) >= 2:
+            lons.append(coords[0])
+            lats.append(coords[1])
+
+    if not lons:
+        log.warning("No valid coordinates found in GeoJSON features")
+        return gpd.GeoDataFrame()
+
+    # Transform corner points to LV95 to get AV bbox
+    x_min, y_min = _wgs84_to_lv95.transform(min(lons), min(lats))
+    x_max, y_max = _wgs84_to_lv95.transform(max(lons), max(lats))
+    av_bbox = (x_min - AV_SEARCH_BUFFER_M, y_min - AV_SEARCH_BUFFER_M,
+               x_max + AV_SEARCH_BUFFER_M, y_max + AV_SEARCH_BUFFER_M)
+
+    # Load AV buildings once with spatial index
+    av_buildings, av_tree = _load_av_buildings(av_path, av_layer, bbox=av_bbox)
+    if av_buildings is None:
+        log.warning("No AV buildings loaded — all points will be unmatched")
+
     rows = []
     geometries = []
 
     for i, feat in enumerate(features):
-        props = feat["properties"]
-        coords = feat["geometry"]["coordinates"]
-        lon, lat = coords[0], coords[1]
+        props = feat.get("properties", {})
+        coords = feat.get("geometry", {}).get("coordinates", [])
+        if len(coords) < 2:
+            rows.append({
+                "input_id": props.get("id", str(i)), "input_egid": props.get("egid", ""),
+                "input_lon": None, "input_lat": None,
+                "av_egid": None, "fid": None, "area_official_m2": None,
+                "status_step1": "invalid_geometry",
+            })
+            geometries.append(None)
+            continue
 
-        polygon, av_egid, av_fid = _find_av_building_at_point(lon, lat, av_path, av_layer)
+        lon, lat = coords[0], coords[1]
+        x, y = _wgs84_to_lv95.transform(lon, lat)
+        pt = Point(x, y)
+
+        polygon, av_egid, av_fid = (None, None, None)
+        if av_buildings is not None:
+            polygon, av_egid, av_fid = _find_av_building_at_point(pt, av_buildings, av_tree)
 
         row = {
             "input_id": props.get("id", str(i)),
@@ -220,20 +265,21 @@ def load_geojson_with_av(geojson_path, av_path, av_layer="lcsf", limit=None):
             "av_egid": av_egid if polygon else None,
             "fid": av_fid if polygon else None,
             "area_official_m2": polygon.area if polygon else None,
-            "status": "ok" if polygon else "no_building_at_point",
+            "status_step1": "ok" if polygon else "no_building_at_point",
         }
 
         rows.append(row)
         geometries.append(polygon)
 
         if (i + 1) % 100 == 0 or (i + 1) == total:
-            matched_so_far = sum(1 for r in rows if r["status"] == "ok")
+            matched_so_far = sum(1 for r in rows if r["status_step1"] == "ok")
             log.info(f"  AV lookup: [{i+1}/{total}] {(i+1)/total*100:.0f}%  "
                      f"matched: {matched_so_far}")
 
     gdf = gpd.GeoDataFrame(rows, geometry=geometries, crs="EPSG:2056")
 
-    matched = sum(1 for r in rows if r["status"] == "ok")
+    matched = sum(1 for r in rows if r["status_step1"] == "ok")
     log.info(f"  Matched to AV: {matched}/{len(rows)}")
 
-    return gdf
+    return gdf[['input_id', 'input_egid', 'input_lon', 'input_lat',
+                'av_egid', 'fid', 'area_official_m2', 'geometry', 'status_step1']]
