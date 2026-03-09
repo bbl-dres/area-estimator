@@ -122,13 +122,13 @@ python python/main.py \
 
 ### Required Data
 
-| Data | Format | Required | Description |
-|------|--------|:--------:|-------------|
-| Building footprints | `.gpkg` / `.shp` / `.geojson` / `.csv` | yes | One of: AV geodata (`--footprints`), WGS84 coordinate CSV (`--coordinates`), or GeoJSON points with AV lookup (`--geojson` + `--av`) |
-| swissALTI3D | GeoTIFF tiles (0.5 m) | yes | Terrain elevation model (DTM) — [swisstopo](https://www.swisstopo.admin.ch/de/hoehenmodell-swissalti3d). Can be auto-downloaded with `--auto-fetch`. |
-| swissSURFACE3D | GeoTIFF tiles (0.5 m) | yes | Surface elevation model (DSM) — [swisstopo](https://www.swisstopo.admin.ch/de/hoehenmodell-swisssurface3d-raster). Can be auto-downloaded with `--auto-fetch`. |
-| AV GeoPackage | `.gpkg` | with `--geojson` | Cadastral survey footprints for spatial containment lookup — [geodienste.ch](https://www.geodienste.ch/services/av) |
-| GWR CSV | `.csv` | with `--estimate-area` | Building classification from [housing-stat.ch](https://www.housing-stat.ch/de/data/supply/public.html). Falls back to swisstopo API per EGID if omitted. |
+| Data | Format | Required | Download | Description |
+|------|--------|:--------:|----------|-------------|
+| Amtliche Vermessung (AV) | `.gpkg` / `.shp` / `.geojson` / `.csv` | yes | [geodienste.ch/services/av](https://geodienste.ch/services/av) | One of: AV geodata (`--footprints`), WGS84 coordinate CSV (`--coordinates`), or GeoJSON points with AV lookup (`--geojson` + `--av`) |
+| swissALTI3D | GeoTIFF tiles (0.5 m) | yes | [swisstopo.admin.ch](https://www.swisstopo.admin.ch/de/hoehenmodell-swissalti3d) | Terrain elevation model (DTM). Can be auto-downloaded with `--auto-fetch`. |
+| swissSURFACE3D Raster | GeoTIFF tiles (0.5 m) | yes | [swisstopo.admin.ch](https://www.swisstopo.admin.ch/de/hoehenmodell-swisssurface3d-raster) | Surface elevation model (DSM). Can be auto-downloaded with `--auto-fetch`. |
+| Amtliche Vermessung (AV) | `.gpkg` | with `--geojson` | [geodienste.ch/services/av](https://geodienste.ch/services/av) | Cadastral survey footprints for spatial containment lookup. |
+| GWR (Federal Register of Buildings) | `.csv` | with `--estimate-area` | [housing-stat.ch/data](https://www.housing-stat.ch/de/data/supply/public.html) | Building classification for floor height lookup. Falls back to swisstopo API per EGID if omitted. |
 
 ### Input Columns
 
