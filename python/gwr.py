@@ -162,19 +162,24 @@ def enrich_with_gwr(buildings_df, gwr_csv_path=None):
         if col not in df.columns:
             df[col] = None
 
-    if 'av_egid' not in df.columns:
-        log.warning("No av_egid column — skipping GWR enrichment")
+    # Use av_egid (from AV geodata) if available, otherwise fall back to egid (from user CSV)
+    if 'av_egid' in df.columns and df['av_egid'].notna().any():
+        egid_col = 'av_egid'
+    elif 'egid' in df.columns and df['egid'].notna().any():
+        egid_col = 'egid'
+    else:
+        log.warning("No av_egid or egid column with values — skipping GWR enrichment")
         return df
 
-    egids_available = df['av_egid'].notna()
+    egids_available = df[egid_col].notna()
 
     if gwr_csv_path:
         # Bulk CSV lookup via vectorized merge
         gwr_df = load_gwr_from_csv(gwr_csv_path)
         gwr_cols = [c for c in ['gkat', 'gklas', 'gbauj', 'gastw'] if c in gwr_df.columns]
 
-        # Merge on av_egid — only update rows that have an EGID
-        df['_egid_int'] = df.loc[egids_available, 'av_egid'].astype(int)
+        # Merge on EGID — only update rows that have an EGID
+        df['_egid_int'] = df.loc[egids_available, egid_col].astype(int)
         merged = df[['_egid_int']].merge(
             gwr_df[gwr_cols], left_on='_egid_int', right_index=True, how='left'
         )
@@ -194,7 +199,7 @@ def enrich_with_gwr(buildings_df, gwr_csv_path=None):
 
         matched = 0
         for i, idx in enumerate(df.index[egids_available]):
-            egid = int(df.at[idx, 'av_egid'])
+            egid = int(df.at[idx, egid_col])
             log.info(f"  GWR API: [{i + 1}/{api_count}] EGID {egid}")
             result = query_gwr_api(egid)
             for col in ['gkat', 'gklas', 'gbauj', 'gastw']:

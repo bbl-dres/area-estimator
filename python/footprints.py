@@ -92,9 +92,9 @@ def load_coordinates_from_csv(csv_path, limit=None):
     Load WGS84 coordinates from CSV and buffer into 10x10m sampling polygons.
 
     Required columns: lon, lat, id
-    Optional columns: egid (mapped to av_egid)
+    Optional columns: egid (preserved as-is for reference and GWR lookup)
 
-    Returns GeoDataFrame in LV95 with columns: id, av_egid, area_official_m2, geometry, status_step1
+    Returns GeoDataFrame in LV95 with columns: id, egid, area_official_m2, geometry, status_step1
     """
     filepath = Path(csv_path)
     log.info(f"Loading coordinates from {filepath.name}...")
@@ -110,10 +110,9 @@ def load_coordinates_from_csv(csv_path, limit=None):
     if missing:
         raise ValueError(f"CSV missing required columns: {missing}. Found: {list(df.columns)}")
 
-    if 'egid' in df.columns:
-        df = df.rename(columns={'egid': 'av_egid'})
-    else:
-        df['av_egid'] = None
+    # Keep user's egid column as-is for reference (av_egid is only from AV geodata)
+    if 'egid' not in df.columns:
+        df['egid'] = None
 
     if limit:
         df = df.head(limit)
@@ -131,6 +130,6 @@ def load_coordinates_from_csv(csv_path, limit=None):
     gdf['status_step1'] = 'ok'
 
     log.info(f"Loaded {len(gdf)} coordinates (buffered to {POINT_BUFFER_M*2}x{POINT_BUFFER_M*2}m)")
-    return gdf[['id', 'av_egid', 'area_official_m2', 'geometry', 'status_step1']]
+    return gdf[['id', 'egid', 'area_official_m2', 'geometry', 'status_step1']]
 
 
