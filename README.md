@@ -7,6 +7,8 @@
 
 Estimates building volumes and gross floor areas using publicly available Swiss elevation models and cadastral data.
 
+> **Two implementations available:** This workflow is provided as a **Python CLI** (`python/`) and as an **FME workbench** (`fme/`). Both can be downloaded and used independently. The FME version requires a licensed copy of [FME Desktop](https://fme.safe.com/).
+
 <p align="center">
   <img src="images/Preview_2.jpg" width="45%" />
   <img src="images/Preview_3.jpg" width="45%" />
@@ -22,7 +24,7 @@ Estimates building volumes and gross floor areas using publicly available Swiss 
 ```mermaid
 flowchart TD
     subgraph INPUT
-        A1[Building input<br><i>CSV with coordinates</i>]
+        A1[Building input<br><i>CSV coordinates or geodata footprints</i>]
         A2[swissALTI3D tiles<br><i>terrain DTM, 0.5m</i>]
         A3[swissSURFACE3D tiles<br><i>surface DSM, 0.5m</i>]
     end
@@ -31,7 +33,7 @@ flowchart TD
     A2 --> S3
     A3 --> S3
 
-    S1["<b>Step 1 — Read Footprints</b><br>CSV: buffer points to 10×10 m<br>Reprojected to LV95"]
+    S1["<b>Step 1 — Read Footprints</b><br>CSV: buffer points to 10×10 m<br>Geodata: load building polygons<br>Reprojected to LV95"]
     S2["<b>Step 2 — Aligned 1×1m Grid</b><br>Minimum rotated rectangle orientation<br>Grid points filtered to footprint"]
     S3["<b>Step 3 — Volume & Heights</b><br>Sample DTM + DSM at each point<br>Volume = Σ max(surface_i − terrain_i, 0) × 1m²"]
     S4["<b>Step 4 — Floor Areas</b> <i>(optional)</i><br>GWR classification → floor height<br>Floors = height_minimal / floor_height<br>GFA = footprint × floors"]
@@ -57,8 +59,9 @@ flowchart TD
 
 | Argument | Required | Description |
 |----------|:--------:|-------------|
-| **Input** | | |
-| `--coordinates FILE` | yes | CSV with `id`, `lon`, `lat` columns (WGS84); optionally `egid` |
+| **Input** (mutually exclusive) | | |
+| `--coordinates FILE` | one of | CSV with `id`, `lon`, `lat` columns (WGS84); optionally `egid` |
+| `--footprints FILE` | one of | Geodata file with building polygons (GeoPackage, Shapefile, or GeoJSON from AV) |
 | **Elevation data** | | |
 | `--alti3d DIR` | yes | Directory with swissALTI3D GeoTIFF tiles |
 | `--surface3d DIR` | yes | Directory with swissSURFACE3D GeoTIFF tiles |
@@ -67,6 +70,7 @@ flowchart TD
 | `-o, --output FILE` | | Output CSV file path (default: `data/output/result_<timestamp>.csv`) |
 | **Filters** | | |
 | `-l, --limit N` | | Process only the first N buildings |
+| `-b, --bbox MIN_LON MIN_LAT MAX_LON MAX_LAT` | | Bounding box filter in WGS84 (only with `--footprints`) |
 | **Area estimation** (off by default) | | |
 | `--estimate-area` | | Enable Step 4: floor area estimation |
 | `--gwr-csv FILE` | | GWR CSV from [housing-stat.ch](https://www.housing-stat.ch/de/data/supply/public.html); if omitted, uses swisstopo API |
@@ -75,19 +79,38 @@ flowchart TD
 
 ## Examples
 
+### Setup
+
 ```bash
 pip install -r python/requirements.txt
 ```
 
-Minimal run — volume and heights only:
+### Example 1 — Estimate volumes for a list of buildings (CSV)
+
+You have a CSV with building coordinates (e.g. exported from a portfolio system).
+The tool buffers each point into a 10x10 m sampling polygon, fetches the elevation
+tiles it needs, and outputs volume and height metrics:
+
+```csv
+id,lon,lat,egid
+1,8.5391,47.3769,1234567
+2,8.5010,47.3925,
+3,7.4474,46.9480,9876543
+```
+
+The `egid` column is optional — when provided, it enables GWR enrichment in Step 4.
+
 ```bash
 python python/main.py \
     --coordinates my_buildings.csv \
     --alti3d data/swissalti3d \
-    --surface3d data/swisssurface3d
+    --surface3d data/swisssurface3d \
+    --auto-fetch \
+    -o portfolio_volumes.csv
 ```
 
-With auto-fetch and floor area estimation:
+Add `--estimate-area` with a GWR CSV to also get floor area estimates:
+
 ```bash
 python python/main.py \
     --coordinates my_buildings.csv \
@@ -95,7 +118,69 @@ python python/main.py \
     --surface3d data/swisssurface3d \
     --auto-fetch \
     --estimate-area --gwr-csv data/gwr/buildings.csv \
-    -o results.csv
+    -o portfolio_full.csv
+```
+
+For small datasets (< 100 buildings) without a GWR CSV, the tool can query the
+swisstopo REST API per building instead:
+
+```bash
+python python/main.py \
+    --coordinates my_buildings.csv \
+    --alti3d data/swissalti3d \
+    --surface3d data/swisssurface3d \
+    --auto-fetch \
+    --estimate-area
+```
+
+### Example 2 — Process all buildings in Switzerland (AV footprints)
+
+Download the full Amtliche Vermessung dataset from
+[geodienste.ch](https://www.geodienste.ch/services/av) as a GeoPackage, and the
+complete swissALTI3D + swissSURFACE3D tile sets from swisstopo. Then run:
+
+```bash
+python python/main.py \
+    --footprints data/av/ch_av_2056.gpkg \
+    --alti3d /data/swisstopo/swissalti3d \
+    --surface3d /data/swisstopo/swisssurface3d \
+    --estimate-area --gwr-csv data/gwr/buildings.csv \
+    -o results/ch_all_buildings.csv
+```
+
+This processes ~2.5 million buildings. For a first test run, limit to a small batch:
+
+```bash
+python python/main.py \
+    --footprints data/av/ch_av_2056.gpkg \
+    --alti3d /data/swisstopo/swissalti3d \
+    --surface3d /data/swisstopo/swisssurface3d \
+    --limit 100
+```
+
+To process a specific region (e.g. City of Bern), use a bounding box filter:
+
+```bash
+python python/main.py \
+    --footprints data/av/ch_av_2056.gpkg \
+    --alti3d /data/swisstopo/swissalti3d \
+    --surface3d /data/swisstopo/swisssurface3d \
+    --bbox 7.40 46.93 7.48 46.97 \
+    --estimate-area --gwr-csv data/gwr/buildings.csv \
+    -o results/bern_buildings.csv
+```
+
+### Example 3 — Quick test with auto-fetch
+
+No local elevation data needed — the tool downloads tiles on-the-fly from swisstopo:
+
+```bash
+python python/main.py \
+    --coordinates my_buildings.csv \
+    --alti3d data/swissalti3d \
+    --surface3d data/swisssurface3d \
+    --auto-fetch \
+    --limit 10
 ```
 
 ---
@@ -106,21 +191,23 @@ python python/main.py \
 
 | Data | Format | Required | Download | Description |
 |------|--------|:--------:|----------|-------------|
-| Building input | `.csv` | yes | — | CSV with building coordinates (`--coordinates`) |
+| Building input | `.csv` or geodata | yes | — | CSV with coordinates (`--coordinates`) or GeoPackage/Shapefile (`--footprints`) |
 | swissALTI3D | GeoTIFF tiles (0.5 m) | yes | [swisstopo.admin.ch](https://www.swisstopo.admin.ch/de/hoehenmodell-swissalti3d) | Terrain elevation model (DTM). Can be auto-downloaded with `--auto-fetch`. |
 | swissSURFACE3D Raster | GeoTIFF tiles (0.5 m) | yes | [swisstopo.admin.ch](https://www.swisstopo.admin.ch/de/hoehenmodell-swisssurface3d-raster) | Surface elevation model (DSM). Can be auto-downloaded with `--auto-fetch`. |
 | GWR (Federal Register of Buildings) | `.csv` | with `--estimate-area` | [housing-stat.ch/data](https://www.housing-stat.ch/de/data/supply/public.html) | Building classification for floor height lookup. Falls back to swisstopo API per EGID if omitted. |
 
-### Input Columns
+### Input Columns (CSV mode)
 
-Expected columns in the user-provided buildings CSV.
+Expected columns in the user-provided buildings CSV (`--coordinates`).
 
 | Column | Required | Description |
 |--------|----------|-------------|
+| `id` | yes | Building ID — preserved as `id` in output |
 | `lon` | yes | WGS84 longitude |
 | `lat` | yes | WGS84 latitude |
-| `id` | yes | Building ID — mapped to `input_id` in output |
-| `egid` | no | Federal building ID — used for GWR enrichment if provided |
+| `egid` | no | Federal building ID — mapped to `av_egid` for GWR enrichment |
+
+When using `--footprints`, the tool reads building polygons directly from the geodata file. The `egid` column (if present) is mapped to `av_egid`. Building type filtering (`Gebaeude`) is applied automatically.
 
 ---
 
@@ -130,9 +217,8 @@ All results are written to a single CSV file (`result_<timestamp>.csv`).
 
 ### Step 1 — Footprints
 
-Buffers CSV coordinates into 10×10 m sampling polygons and reprojects to LV95 (EPSG:2056).
-
-The `id` column from the CSV is preserved in the output. The `egid` column (if present) is mapped to `av_egid`.
+- **CSV mode** (`--coordinates`): Buffers each point into a 10×10 m sampling polygon and reprojects to LV95. The `id` column is preserved; `egid` is mapped to `av_egid`.
+- **Geodata mode** (`--footprints`): Loads building polygons directly, filters to buildings (`Gebaeude`), and ensures LV95 projection. The `egid` column is mapped to `av_egid`; a `fid` is assigned from the source feature ID.
 
 | Column | Format | Required | Source | Description |
 |--------|--------|:--------:|--------|-------------|
@@ -156,8 +242,8 @@ Samples DTM and DSM elevations at each grid point to compute above-ground volume
 | `volume_above_ground_m3` | float | yes | DTM + DSM | Above-ground volume: `Σ max(surface_i − terrain_i, 0) × 1m²` |
 | `elevation_base_m` | float | yes | DTM | Lowest terrain point under footprint (m asl) — reference datum |
 | `elevation_roof_base_m` | float | yes | DSM | Lowest surface point in footprint — estimated eave (m asl) |
-| `height_mean_m` | float | yes | DTM + DSM | Mean building height above base (m) |
-| `height_max_m` | float | yes | DTM + DSM | Max building height above base — ridge (m) |
+| `height_mean_m` | float | yes | DTM + DSM | Mean above-ground building height (m) |
+| `height_max_m` | float | yes | DTM + DSM | Max above-ground building height — ridge (m) |
 | `height_minimal_m` | float | yes | Computed | `volume / footprint_area` — equivalent uniform box height (m) |
 | `grid_points_count` | integer | yes | Computed | Number of valid elevation sample points |
 | `status_step3` | string | yes | Computed | `success` / `skipped` / `no_grid_points` / `no_height_data` / `error` |
@@ -222,9 +308,9 @@ area-estimator/
 │   ├── area.py                           Step 4: floor area estimation
 │   └── requirements.txt
 ├── fme/                              ← FME workbench (same as python, requires license)
-├── plugins/
+├── tools/
 │   ├── roof-estimator/               ← roof shape analysis from 3D meshes
-│   └── biodiversity-estimator/       ← biodiversity metrics (planned)
+│   └── green-roof-eval/              ← green roof detection (FME-based)
 ├── legacy/                            ← original implementations (reference)
 │   ├── volume-estimator/
 │   ├── area-estimator/
