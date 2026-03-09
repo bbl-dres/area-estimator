@@ -112,14 +112,43 @@ python python/main.py \
 
 ## Inputs
 
-| Column | Format | Status | Description |
-|--------|--------|:------:|-------------|
-| `--footprints` | `.gpkg` / `.shp` / `.geojson` | one of three | AV building polygon geodata — auto-filters to `Art = 'Gebaeude'` |
-| `--coordinates` | CSV (`lon`, `lat`) | one of three | WGS84 point list — footprint buffered to 10×10 m |
-| `--geojson` + `--av` | GeoJSON points + AV GeoPackage | one of three | Spatial containment match against AV polygons — no fuzzy matching |
-| `--alti3d` | GeoTIFF tiles (0.5 m) | MUST | swissALTI3D terrain elevation (DTM) — [swisstopo](https://www.swisstopo.admin.ch/de/hoehenmodell-swissalti3d) |
-| `--surface3d` | GeoTIFF tiles (0.5 m) | MUST | swissSURFACE3D surface elevation (DSM) — [swisstopo](https://www.swisstopo.admin.ch/de/hoehenmodell-swisssurface3d-raster) |
-| `--gwr-csv` | CSV from [housing-stat.ch](https://www.housing-stat.ch/de/data/supply/public.html) | OPTIONAL | GWR building classification — required for Step 4; falls back to swisstopo API per EGID |
+### Data Sources
+
+| Name | Link | Description |
+|------|------|-------------|
+| Amtliche Vermessung (AV) | [geodienste.ch/services/av](https://www.geodienste.ch/services/av) | Building footprint polygons from the official Swiss cadastral survey. Used as primary geometry source via `--footprints` or as a lookup layer via `--av` for point-based inputs. |
+| swissALTI3D | [swisstopo.admin.ch](https://www.swisstopo.admin.ch/de/hoehenmodell-swissalti3d) | Terrain elevation model (DTM) at 0.5 m resolution. GeoTIFF tiles provided via `--alti3d`. Used in Step 3 to determine ground elevation under each building. |
+| swissSURFACE3D Raster | [swisstopo.admin.ch](https://www.swisstopo.admin.ch/de/hoehenmodell-swisssurface3d-raster) | Surface elevation model (DSM) at 0.5 m resolution. GeoTIFF tiles provided via `--surface3d`. Used in Step 3 to determine roof/surface elevation above each building. |
+| GWR | [housing-stat.ch](https://www.housing-stat.ch/de/data/supply/public.html) | Federal Register of Buildings and Dwellings. CSV bulk download provided via `--gwr-csv`. Used in Step 4 for building classification and floor height lookup. Falls back to swisstopo API per EGID if omitted. |
+
+### Input Columns
+
+#### `--footprints` (geodata file)
+
+| Column | Description |
+|--------|-------------|
+| `egid` | Federal building ID (optional, auto-set to `None` if missing) |
+| `fid` | Feature ID (optional, defaults to row index) |
+| `geometry` | Building polygon |
+| `flaeche` / `area` / `shape_area` | Official footprint area in m² (optional, first match used) |
+| `bbart` / `art` / `type` / `objektart` | Building type — used to filter to `Gebaeude` (optional) |
+
+#### `--coordinates` (CSV)
+
+| Column | Description |
+|--------|-------------|
+| `lon` / `longitude` / `lng` / `x` | WGS84 longitude (required) |
+| `lat` / `latitude` / `y` | WGS84 latitude (required) |
+| `egid` | Federal building ID (optional) |
+| `fid` | Feature ID (optional, defaults to row index) |
+
+#### `--geojson` (GeoJSON points)
+
+| Column | Description |
+|--------|-------------|
+| `geometry` | Point geometry in WGS84 (required) |
+| `bbl_id` | Building address ID → mapped to `input_id` (optional, defaults to feature index) |
+| `egid` | Reference EGID → mapped to `input_egid` (optional, authoritative EGID comes from AV) |
 
 ---
 
