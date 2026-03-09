@@ -156,6 +156,7 @@ def estimate_floor_area(volume_result):
         'floors_estimated': None,
         'floor_height_used_m': None,
         'building_type': None,
+        'status_step4': None,
     })
 
     footprint = result.get('area_footprint_m2', 0)
@@ -163,6 +164,7 @@ def estimate_floor_area(volume_result):
     height_minimal = result.get('height_minimal_m', 0)
 
     if not footprint or footprint <= 0 or not volume or volume <= 0:
+        result['status_step4'] = 'no_volume'
         return result
 
     # Use height_minimal_m (volume / footprint) for floor estimation
@@ -170,6 +172,7 @@ def estimate_floor_area(volume_result):
         height_minimal = volume / footprint
 
     if height_minimal > 200:
+        result['status_step4'] = 'height_exceeds_200m'
         return result
 
     # Floor height lookup
@@ -196,5 +199,6 @@ def estimate_floor_area(volume_result):
     result['floors_estimated'] = floors_rounded
     result['floor_height_used_m'] = round((fh_min + fh_max) / 2, 2)
     result['building_type'] = description
+    result['status_step4'] = 'success'
 
     return result

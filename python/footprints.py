@@ -8,7 +8,7 @@ Loads building polygons from one of three sources:
 3. GeoJSON with point features — footprints resolved from AV via spatial containment
 
 All functions return a GeoDataFrame in LV95 (EPSG:2056) with columns:
-    egid, area_official_m2, geometry, status (+ id for CSV, fid for geodata/GeoJSON)
+    av_egid, area_official_m2, geometry, status (+ id for CSV, fid for geodata/GeoJSON)
 """
 
 import json
@@ -39,7 +39,7 @@ def load_footprints_from_file(filepath, bbox=None, limit=None):
     Filters to building polygons (type = "Gebaeude") if a type column exists.
     Preserves official area attribute as area_official_m2 for reference.
 
-    Returns GeoDataFrame in LV95 with columns: egid, fid, area_official_m2, geometry, status
+    Returns GeoDataFrame in LV95 with columns: av_egid, fid, area_official_m2, geometry, status
     """
     filepath = Path(filepath)
     log.info(f"Loading footprints from {filepath.name}...")
@@ -55,8 +55,11 @@ def load_footprints_from_file(filepath, bbox=None, limit=None):
 
     gdf.columns = [c.lower() for c in gdf.columns]
 
-    if 'egid' not in gdf.columns:
-        gdf['egid'] = None
+    # Rename AV's egid column to av_egid to distinguish from user input
+    if 'egid' in gdf.columns:
+        gdf = gdf.rename(columns={'egid': 'av_egid'})
+    else:
+        gdf['av_egid'] = None
     if 'fid' not in gdf.columns:
         gdf['fid'] = gdf.index.astype(str)
 
@@ -84,9 +87,9 @@ def load_footprints_from_file(filepath, bbox=None, limit=None):
     if limit:
         gdf = gdf.head(limit)
 
-    gdf['status'] = 'ok'
+    gdf['status_step1'] = 'ok'
     log.info(f"Loaded {len(gdf)} building footprints")
-    return gdf[['egid', 'fid', 'area_official_m2', 'geometry', 'status']]
+    return gdf[['av_egid', 'fid', 'area_official_m2', 'geometry', 'status_step1']]
 
 
 def load_coordinates_from_csv(csv_path, limit=None):
@@ -128,10 +131,10 @@ def load_coordinates_from_csv(csv_path, limit=None):
                        pt.x + POINT_BUFFER_M, pt.y + POINT_BUFFER_M)
     )
     gdf['area_official_m2'] = None
-    gdf['status'] = 'ok'
+    gdf['status_step1'] = 'ok'
 
     log.info(f"Loaded {len(gdf)} coordinates (buffered to {POINT_BUFFER_M*2}x{POINT_BUFFER_M*2}m)")
-    return gdf[['id', 'egid', 'area_official_m2', 'geometry', 'status']]
+    return gdf[['id', 'egid', 'area_official_m2', 'geometry', 'status_step1']]
 
 
 def _find_av_building_at_point(lon, lat, av_path, av_layer):
@@ -185,7 +188,7 @@ def load_geojson_with_av(geojson_path, av_path, av_layer="lcsf", limit=None):
     The authoritative EGID comes from the AV (GWR_EGID attribute).
 
     Returns GeoDataFrame in LV95 with columns:
-        input_id, input_egid, egid, fid, area_official_m2, geometry, status
+        input_id, input_egid, av_egid, fid, area_official_m2, geometry, status
     """
     log.info(f"Loading GeoJSON from {Path(geojson_path).name}...")
 
@@ -214,7 +217,7 @@ def load_geojson_with_av(geojson_path, av_path, av_layer="lcsf", limit=None):
             "input_egid": props.get("egid", ""),
             "input_lon": lon,
             "input_lat": lat,
-            "egid": av_egid if polygon else None,
+            "av_egid": av_egid if polygon else None,
             "fid": av_fid if polygon else None,
             "area_official_m2": polygon.area if polygon else None,
             "status": "ok" if polygon else "no_building_at_point",

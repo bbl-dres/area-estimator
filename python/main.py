@@ -158,7 +158,7 @@ def main():
         return 1
 
     total = len(buildings)
-    with_geometry = buildings[buildings['status'] == 'ok']
+    with_geometry = buildings[buildings['status_step1'] == 'ok']
     log.info(f"  Total features:  {total}")
     log.info(f"  With footprint:  {len(with_geometry)}")
     log.info(f"  Without:         {total - len(with_geometry)}")
@@ -205,28 +205,28 @@ def main():
         t_start = time.time()
 
         for i, (_, row) in enumerate(buildings.iterrows()):
-            if row['status'] != 'ok':
+            if row['status_step1'] != 'ok':
                 # No footprint — carry forward metadata with empty volume
                 result = {
-                    'egid': row['egid'], 'fid': row.get('fid'),
+                    'av_egid': row.get('av_egid'), 'fid': row.get('fid'),
                     'area_footprint_m2': None, 'area_official_m2': None,
                     'volume_above_ground_m3': None, 'elevation_base_m': None,
                     'elevation_roof_base_m': None, 'height_mean_m': None,
                     'height_max_m': None, 'height_minimal_m': None,
-                    'grid_points_count': None, 'status': row['status'],
+                    'grid_points_count': None, 'status_step3': 'skipped',
                 }
             else:
                 result = calculate_building_volume(
                     polygon=row.geometry,
                     tile_index=tile_index,
-                    egid=row['egid'],
+                    av_egid=row.get('av_egid'),
                     fid=row.get('fid'),
                     area_official_m2=row['area_official_m2'],
                 )
 
             # Preserve extra columns from input (e.g. input_id)
             for col in buildings.columns:
-                if col not in ('id', 'egid', 'fid', 'area_official_m2', 'geometry', 'status'):
+                if col not in ('id', 'av_egid', 'fid', 'area_official_m2', 'geometry', 'status_step1'):
                     result[col] = row[col]
 
             results.append(result)
@@ -268,7 +268,7 @@ def main():
 
     # ── Output CSV ────────────────────────────────────────────────────────
     # Reorder columns: identifiers first
-    id_cols = ["input_id", "input_egid", "input_lon", "input_lat", "egid", "fid"]
+    id_cols = ["input_id", "input_egid", "input_lon", "input_lat", "av_egid", "fid"]
     existing_id_cols = [c for c in id_cols if c in results_df.columns]
     other_cols = [c for c in results_df.columns if c not in id_cols]
     results_df = results_df[existing_id_cols + other_cols]

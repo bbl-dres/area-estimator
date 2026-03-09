@@ -182,7 +182,7 @@ class TileIndex:
         self._cache_order.clear()
 
 
-def calculate_building_volume(polygon, tile_index, egid=None, fid=None,
+def calculate_building_volume(polygon, tile_index, av_egid=None, fid=None,
                               area_official_m2=None, voxel_size=1.0):
     """
     Calculate volume and height metrics for a single building.
@@ -193,7 +193,7 @@ def calculate_building_volume(polygon, tile_index, egid=None, fid=None,
     Args:
         polygon: Shapely Polygon in LV95 (EPSG:2056)
         tile_index: TileIndex instance with loaded elevation tiles
-        egid: Optional EGID
+        av_egid: Optional EGID from Amtliche Vermessung (GWR_EGID)
         fid: Optional FID from cadastral survey
         area_official_m2: Optional official area from source data (reference only)
         voxel_size: Grid cell size in meters
@@ -204,7 +204,7 @@ def calculate_building_volume(polygon, tile_index, egid=None, fid=None,
     footprint_area = polygon.area
 
     empty_result = {
-        'egid': egid,
+        'av_egid': av_egid,
         'fid': fid,
         'area_footprint_m2': round(footprint_area, 2),
         'area_official_m2': area_official_m2,
@@ -222,7 +222,7 @@ def calculate_building_volume(polygon, tile_index, egid=None, fid=None,
         grid_points = create_aligned_grid_points(polygon, voxel_size)
 
         if len(grid_points) == 0:
-            return {**empty_result, 'status': 'no_grid_points'}
+            return {**empty_result, 'status_step3': 'no_grid_points'}
 
         # Determine required tiles
         tiles = tile_index.get_required_tiles(polygon.bounds)
@@ -238,7 +238,7 @@ def calculate_building_volume(polygon, tile_index, egid=None, fid=None,
 
         if len(valid_terrain) == 0:
             return {**empty_result, 'grid_points_count': len(grid_points),
-                    'status': 'no_height_data'}
+                    'status_step3': 'no_height_data'}
 
         # Base height = lowest terrain point under building
         base_height = np.min(valid_terrain)
@@ -258,7 +258,7 @@ def calculate_building_volume(polygon, tile_index, egid=None, fid=None,
         height_minimal = volume / footprint_area if footprint_area > 0 else 0
 
         return {
-            'egid': egid,
+            'av_egid': av_egid,
             'fid': fid,
             'area_footprint_m2': round(footprint_area, 2),
             'area_official_m2': area_official_m2,
@@ -269,9 +269,9 @@ def calculate_building_volume(polygon, tile_index, egid=None, fid=None,
             'height_max_m': round(height_max, 2),
             'height_minimal_m': round(height_minimal, 2),
             'grid_points_count': len(valid_terrain),
-            'status': 'success',
+            'status_step3': 'success',
         }
 
     except Exception as e:
-        log.debug(f"Error processing building (EGID={egid}, FID={fid}): {e}")
-        return {**empty_result, 'status': 'error'}
+        log.debug(f"Error processing building (av_egid={av_egid}, FID={fid}): {e}")
+        return {**empty_result, 'status_step3': 'error'}

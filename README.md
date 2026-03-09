@@ -59,7 +59,7 @@ flowchart TD
 |----------|:--------:|-------------|
 | **Input** (one required) | | |
 | `--footprints FILE` | * | Geodata file (`.gpkg`, `.shp`, `.geojson`) from Amtliche Vermessung |
-| `--coordinates FILE` | * | CSV with `lon`, `lat` columns (WGS84); optionally `egid`, `fid` |
+| `--coordinates FILE` | * | CSV with `id`, `lon`, `lat` columns (WGS84); optionally `egid` |
 | `--geojson FILE` | * | GeoJSON with building addresses (Point + EGID) — requires `--av` |
 | **Elevation data** | | |
 | `--alti3d DIR` | yes | Directory with swissALTI3D GeoTIFF tiles |
@@ -155,7 +155,7 @@ Input columns are preserved in the output with `input_` prefix: `input_id`, `inp
 
 | Column | Format | Status | Source | Description |
 |--------|--------|:------:|--------|-------------|
-| `egid` | integer | OPTIONAL | AV | Federal building ID (`GWR_EGID`); `None` if unavailable |
+| `av_egid` | integer | OPTIONAL | AV | Federal building ID (`GWR_EGID`); `None` if unavailable |
 | `fid` | integer | MUST | AV | Feature ID from GeoPackage; defaults to row index |
 | `area_footprint_m2` | float | MUST | Computed | Footprint area from polygon geometry (m²) |
 | `area_official_m2` | float | OPTIONAL | AV | Official area from source attribute (m²) |
