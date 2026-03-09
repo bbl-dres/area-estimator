@@ -8,7 +8,6 @@ rotated rectangle) to maximize coverage for non-axis-aligned buildings.
 """
 
 import numpy as np
-from shapely.geometry import Point
 from shapely.affinity import rotate
 from shapely.prepared import prep
 
@@ -18,8 +17,14 @@ def get_building_orientation(polygon):
     Calculate building orientation using minimum area bounding rectangle.
 
     Returns rotation angle in degrees (angle of the longest edge).
+    Returns 0.0 for degenerate polygons (too small or linear).
     """
     min_rect = polygon.minimum_rotated_rectangle
+
+    # Guard against degenerate geometry (point or line)
+    if min_rect.geom_type != 'Polygon' or min_rect.area < 1e-6:
+        return 0.0
+
     coords = list(min_rect.exterior.coords)
 
     edge_lengths = []
@@ -73,26 +78,30 @@ def create_aligned_grid_points(polygon, voxel_size=1.0):
     x_coords = np.arange(x_min + voxel_size / 2, x_max, voxel_size)
     y_coords = np.arange(y_min + voxel_size / 2, y_max, voxel_size)
 
-    # Filter points inside the rotated polygon using prepared geometry
+    # Filter points inside the rotated polygon using vectorized containment
     prepared_polygon = prep(rotated_polygon)
     xx, yy = np.meshgrid(x_coords, y_coords)
-    candidates = [Point(x, y) for x, y in zip(xx.ravel(), yy.ravel())]
-    rotated_points = list(filter(prepared_polygon.contains, candidates))
+    flat_x = xx.ravel()
+    flat_y = yy.ravel()
 
-    if len(rotated_points) == 0:
+    # Use shapely's vectorized contains for a significant speedup over
+    # creating individual Point objects
+    from shapely import contains_xy
+    mask = contains_xy(rotated_polygon, flat_x, flat_y)
+    inside_x = flat_x[mask]
+    inside_y = flat_y[mask]
+
+    if len(inside_x) == 0:
         return []
 
-    # Rotate points back to original orientation
+    # Rotate points back to original orientation (vectorized)
     cx, cy = rotated_polygon.centroid.x, rotated_polygon.centroid.y
     angle_rad = np.radians(rotation_angle)
     cos_a, sin_a = np.cos(angle_rad), np.sin(angle_rad)
 
-    original_points = []
-    for point in rotated_points:
-        dx, dy = point.x - cx, point.y - cy
-        original_points.append((
-            cx + dx * cos_a - dy * sin_a,
-            cy + dx * sin_a + dy * cos_a,
-        ))
+    dx = inside_x - cx
+    dy = inside_y - cy
+    orig_x = cx + dx * cos_a - dy * sin_a
+    orig_y = cy + dx * sin_a + dy * cos_a
 
-    return original_points
+    return list(zip(orig_x.tolist(), orig_y.tolist()))

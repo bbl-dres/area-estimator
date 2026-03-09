@@ -3,7 +3,7 @@
 Swiss Building Volume & Area Estimator
 
 Unified CLI that runs the full pipeline:
-  Step 1 — Read building footprints (geodata file, CSV coordinates, or GeoJSON with AV lookup)
+  Step 1 — Read building footprints (geodata file or CSV coordinates)
   Step 2 — Ensure all required elevation tiles are available (download if --auto-fetch)
   Step 3 — Create aligned 1×1m grid + sample elevations + calculate volume
   Step 4 — Estimate floor areas using GWR classification (optional, off by default)
@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from footprints import load_footprints_from_file, load_coordinates_from_csv, load_geojson_with_av
+from footprints import load_footprints_from_file, load_coordinates_from_csv
 from volume import TileIndex, calculate_building_volume
 from tile_fetcher import ensure_tiles, tile_ids_from_bounds
 from gwr import enrich_with_gwr
@@ -69,20 +69,12 @@ def main():
                                   '(GeoPackage, Shapefile, or GeoJSON from Amtliche Vermessung)')
     input_group.add_argument('--coordinates',
                              help='CSV file with WGS84 coordinates (columns: lon, lat)')
-    input_group.add_argument('--geojson',
-                             help='GeoJSON with building addresses (requires --av for footprint lookup)')
 
     # Input: elevation tiles
     parser.add_argument('--alti3d', required=True,
                         help='Directory containing swissALTI3D GeoTIFF tiles')
     parser.add_argument('--surface3d', required=True,
                         help='Directory containing swissSURFACE3D GeoTIFF tiles')
-
-    # Input: Amtliche Vermessung (for --geojson mode)
-    parser.add_argument('--av',
-                        help='AV GeoPackage (e.g. av_2056.gpkg) — required with --geojson')
-    parser.add_argument('--av-layer', default='lcsf',
-                        help='AV layer name (default: lcsf)')
 
     # Auto-fetch missing tiles
     parser.add_argument('--auto-fetch', action='store_true',
@@ -123,9 +115,6 @@ def main():
     log.info(f"Log file: {log_file}")
 
     # ── Validate inputs ────────────────────────────────────────────────────
-    if args.geojson and not args.av:
-        parser.error("--geojson requires --av (path to AV GeoPackage)")
-
     alti3d_dir = Path(args.alti3d)
     surface3d_dir = Path(args.surface3d)
 
@@ -146,11 +135,7 @@ def main():
     log.info("=" * 50)
 
     try:
-        if args.geojson:
-            buildings = load_geojson_with_av(
-                args.geojson, args.av, args.av_layer, limit=args.limit
-            )
-        elif args.footprints:
+        if args.footprints:
             buildings = load_footprints_from_file(
                 args.footprints, bbox=args.bbox, limit=args.limit,
             )
