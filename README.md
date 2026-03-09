@@ -178,6 +178,10 @@ python python/main.py --coordinates my_buildings.csv \
 
 | Column | Status | Source | Description |
 |--------|:------:|--------|-------------|
+| `input_id` | MUST | Input | User-provided identifier (e.g. `bbl_id` from GeoJSON) |
+| `input_egid` | OPTIONAL | Input | EGID from input data (reference only, not used for matching) |
+| `input_lon` | MUST | Input | Original WGS84 longitude |
+| `input_lat` | MUST | Input | Original WGS84 latitude |
 | Building polygons | MUST | [geodienste.ch](https://www.geodienste.ch/services/av) | `.gpkg`, `.shp`, `.geojson` — or CSV with `lon`, `lat` coordinates |
 | AV GeoPackage | MUST (with `--geojson`) | [geodienste.ch](https://www.geodienste.ch/services/av) | Spatial footprint lookup via point-in-polygon containment |
 
@@ -217,16 +221,12 @@ Access: CSV bulk from [housing-stat.ch/data](https://www.housing-stat.ch/de/data
 
 All results are written to a single CSV file (`result_<timestamp>.csv`).
 
-### Step 1 — Identifiers & Metadata
+### Step 1 — Resolved from AV
 
-Carried through from input and AV spatial matching.
+Computed during spatial matching against the Amtliche Vermessung.
 
 | Column | Status | Source | Description |
 |--------|:------:|--------|-------------|
-| `input_id` | MUST | Input | User-provided identifier (e.g. `bbl_id` from GeoJSON) |
-| `input_egid` | OPTIONAL | Input | EGID from input data (reference only, not used for matching) |
-| `input_lon` | MUST | Input | Original WGS84 longitude |
-| `input_lat` | MUST | Input | Original WGS84 latitude |
 | `egid` | MUST | AV | Authoritative federal building ID (`GWR_EGID` from AV) |
 | `fid` | MUST | AV | GeoPackage feature ID — direct link to AV polygon |
 | `area_footprint_m2` | MUST | Geometry | Footprint area computed from polygon (m²) |
