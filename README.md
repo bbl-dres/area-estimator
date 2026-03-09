@@ -85,26 +85,34 @@ flowchart TD
 pip install -r python/requirements.txt
 ```
 
-Process an input file (coordinates CSV):
-Reads building locations from a CSV, downloads matching elevation tiles on demand, and estimates volume, heights, and floor areas using GWR classification.
+Minimal run — volume and heights only from a cadastral survey file:
+```bash
+python python/main.py \
+    --footprints data/land_cover.gpkg \
+    --alti3d data/swissalti3d \
+    --surface3d data/swisssurface3d
+```
+
+From a CSV of coordinates, with auto-fetch and floor area estimation:
 ```bash
 python python/main.py \
     --coordinates my_buildings.csv \
     --alti3d data/swissalti3d \
     --surface3d data/swisssurface3d \
+    --auto-fetch \
     --estimate-area --gwr-csv data/gwr/buildings.csv \
     -o results.csv
 ```
 
-Process the full AV file with auto-fetch and floor area estimation:
-Processes all buildings in the Amtliche Vermessung, automatically downloading any missing elevation tiles from swisstopo, and outputs volume, heights, and gross floor areas.
+From a GeoJSON address list, resolved against an AV file:
 ```bash
 python python/main.py \
-    --footprints data/bodenbedeckung.gpkg \
+    --geojson addresses.geojson \
+    --av data/av_2056.gpkg \
     --alti3d data/swissalti3d \
     --surface3d data/swisssurface3d \
-    --estimate-area --gwr-csv data/gwr/buildings.csv \
     --auto-fetch \
+    --estimate-area --gwr-csv data/gwr/buildings.csv \
     -o results.csv
 ```
 
@@ -112,7 +120,19 @@ python python/main.py \
 
 ## Inputs
 
-#### `--footprints` (geodata file)
+### Required Data
+
+| Data | Format | Required | Description |
+|------|--------|:--------:|-------------|
+| Building footprints | `.gpkg` / `.shp` / `.geojson` / `.csv` | yes | One of: AV geodata (`--footprints`), WGS84 coordinate CSV (`--coordinates`), or GeoJSON points with AV lookup (`--geojson` + `--av`) |
+| swissALTI3D | GeoTIFF tiles (0.5 m) | yes | Terrain elevation model (DTM) — [swisstopo](https://www.swisstopo.admin.ch/de/hoehenmodell-swissalti3d). Can be auto-downloaded with `--auto-fetch`. |
+| swissSURFACE3D | GeoTIFF tiles (0.5 m) | yes | Surface elevation model (DSM) — [swisstopo](https://www.swisstopo.admin.ch/de/hoehenmodell-swisssurface3d-raster). Can be auto-downloaded with `--auto-fetch`. |
+| AV GeoPackage | `.gpkg` | with `--geojson` | Cadastral survey footprints for spatial containment lookup — [geodienste.ch](https://www.geodienste.ch/services/av) |
+| GWR CSV | `.csv` | with `--estimate-area` | Building classification from [housing-stat.ch](https://www.housing-stat.ch/de/data/supply/public.html). Falls back to swisstopo API per EGID if omitted. |
+
+### Input Columns
+
+**`--footprints`** (geodata file)
 
 | Column | Description |
 |--------|-------------|
@@ -122,7 +142,7 @@ python python/main.py \
 | `flaeche` / `area` / `shape_area` | Official footprint area in m² (optional, first match used) |
 | `bbart` / `art` / `type` / `objektart` | Building type — used to filter to `Gebaeude` (optional) |
 
-#### `--coordinates` (CSV)
+**`--coordinates`** (CSV)
 
 | Column | Description |
 |--------|-------------|
@@ -131,7 +151,7 @@ python python/main.py \
 | `egid` | Federal building ID (optional) |
 | `fid` | Feature ID (optional, defaults to row index) |
 
-#### `--geojson` (GeoJSON points)
+**`--geojson`** (GeoJSON points)
 
 | Column | Description |
 |--------|-------------|
