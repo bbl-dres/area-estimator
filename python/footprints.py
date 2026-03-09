@@ -36,7 +36,7 @@ def load_footprints_from_file(filepath, bbox=None, limit=None):
     """
     Load building footprints from a geodata file (GeoPackage, Shapefile, GeoJSON).
 
-    Filters to building polygons (Art = Gebaeude) if a type column exists.
+    Filters to building polygons (type = "Gebaeude") if a type column exists.
     Preserves official area attribute as area_official_m2 for reference.
 
     Returns GeoDataFrame in LV95 with columns: egid, fid, area_official_m2, geometry, status

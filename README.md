@@ -31,7 +31,7 @@ flowchart TD
     A2 --> S3
     A3 --> S3
 
-    S1["<b>Step 1 — Read Footprints</b><br>Spatial containment matching (point-in-polygon)<br>input_id, input_egid → egid from AV<br>WGS84 → LV95"]
+    S1["<b>Step 1 — Read Footprints</b><br>Geodata: read + filter to buildings<br>CSV: buffer points to 10×10 m<br>GeoJSON + AV: spatial containment match<br>All reprojected to LV95"]
     S2["<b>Step 2 — Aligned 1×1m Grid</b><br>Minimum rotated rectangle orientation<br>Grid points filtered to footprint"]
     S3["<b>Step 3 — Volume & Heights</b><br>Sample DTM + DSM at each point<br>Volume = Σ max(surface − base, 0) × 1m²"]
     S4["<b>Step 4 — Floor Areas</b> <i>(optional)</i><br>GWR classification → floor height<br>Floors = height_minimal / floor_height<br>GFA = footprint × floors"]
@@ -69,10 +69,10 @@ flowchart TD
 | `--av FILE` | with `--geojson` | AV GeoPackage (e.g. `av_2056.gpkg`) for footprint lookup |
 | `--av-layer NAME` | | AV layer name (default: `lcsf`) |
 | **Output** | | |
-| `-o, --output FILE` | yes | Output CSV file path |
+| `-o, --output FILE` | | Output CSV file path (default: `data/output/result_<timestamp>.csv`) |
 | **Filters** | | |
 | `-l, --limit N` | | Process only the first N buildings |
-| `-b, --bbox W S E N` | | Bounding box in WGS84 (only with `--footprints`) |
+| `-b, --bbox MINLON MINLAT MAXLON MAXLAT` | | Bounding box in WGS84 (only with `--footprints`) |
 | **Area estimation** (off by default) | | |
 | `--estimate-area` | | Enable Step 4: floor area estimation |
 | `--gwr-csv FILE` | | GWR CSV from [housing-stat.ch](https://www.housing-stat.ch/de/data/supply/public.html); if omitted, uses swisstopo API |
@@ -92,7 +92,7 @@ python python/main.py \
     --coordinates my_buildings.csv \
     --alti3d data/swissalti3d \
     --surface3d data/swisssurface3d \
-    --estimate-area --gwr-csv data/gwr/gebaeude.csv \
+    --estimate-area --gwr-csv data/gwr/buildings.csv \
     -o results.csv
 ```
 
@@ -103,7 +103,7 @@ python python/main.py \
     --footprints data/bodenbedeckung.gpkg \
     --alti3d data/swissalti3d \
     --surface3d data/swisssurface3d \
-    --estimate-area --gwr-csv data/gwr/gebaeude.csv \
+    --estimate-area --gwr-csv data/gwr/buildings.csv \
     --auto-fetch \
     -o results.csv
 ```
@@ -111,17 +111,6 @@ python python/main.py \
 ---
 
 ## Inputs
-
-### Data Sources
-
-| Name | Link | Description |
-|------|------|-------------|
-| Amtliche Vermessung (AV) | [geodienste.ch/services/av](https://www.geodienste.ch/services/av) | Building footprint polygons from the official Swiss cadastral survey. Used as primary geometry source via `--footprints` or as a lookup layer via `--av` for point-based inputs. |
-| swissALTI3D | [swisstopo.admin.ch](https://www.swisstopo.admin.ch/de/hoehenmodell-swissalti3d) | Terrain elevation model (DTM) at 0.5 m resolution. GeoTIFF tiles provided via `--alti3d`. Used in Step 3 to determine ground elevation under each building. |
-| swissSURFACE3D Raster | [swisstopo.admin.ch](https://www.swisstopo.admin.ch/de/hoehenmodell-swisssurface3d-raster) | Surface elevation model (DSM) at 0.5 m resolution. GeoTIFF tiles provided via `--surface3d`. Used in Step 3 to determine roof/surface elevation above each building. |
-| GWR | [housing-stat.ch](https://www.housing-stat.ch/de/data/supply/public.html) | Federal Register of Buildings and Dwellings. CSV bulk download provided via `--gwr-csv`. Used in Step 4 for building classification and floor height lookup. Falls back to swisstopo API per EGID if omitted. |
-
-### Input Columns
 
 #### `--footprints` (geodata file)
 
@@ -162,8 +151,8 @@ Resolves building polygons from [Amtliche Vermessung](https://www.geodienste.ch/
 
 | Column | Format | Status | Source | Description |
 |--------|--------|:------:|--------|-------------|
-| `egid` | integer | MUST | AV | Authoritative federal building ID (`GWR_EGID`) |
-| `fid` | integer | MUST | AV | GeoPackage feature ID |
+| `egid` | integer | OPTIONAL | AV / Input | Federal building ID — from AV (`GWR_EGID`) or input data; `None` if unavailable |
+| `fid` | integer | MUST | AV / Input | Feature ID — from GeoPackage or input data; defaults to row index if missing |
 | `area_footprint_m2` | float | MUST | Computed | Footprint area from polygon geometry (m²) |
 | `area_official_m2` | float | OPTIONAL | AV | Official area from source attribute (m²) |
 
@@ -200,10 +189,11 @@ Estimates gross floor area from GWR building classification and `height_minimal_
 | `gklas` | integer | OPTIONAL | GWR | Building class code |
 | `gbauj` | integer | OPTIONAL | GWR | Construction year |
 | `gastw` | integer | OPTIONAL | GWR | Number of stories |
-| `floor_height_used_m` | float | MUST | Lookup | Floor height applied (m) |
-| `floors_estimated` | float | MUST | Computed | Estimated floor count |
-| `area_floor_total_m2` | float | MUST | Computed | Gross floor area — `footprint × floors` (m²) |
-| `area_accuracy` | string | MUST | Computed | `high` (±10–15%) / `medium` (±15–25%) / `low` (±25–40%) |
+| `floor_height_used_m` | float | OPTIONAL | Lookup | Floor height applied (m) |
+| `floors_estimated` | float | OPTIONAL | Computed | Estimated floor count |
+| `area_floor_total_m2` | float | OPTIONAL | Computed | Gross floor area — `footprint × floors` (m²) |
+| `area_accuracy` | string | OPTIONAL | Computed | `high` (±10–15%) / `medium` (±15–25%) / `low` (±25–40%) |
+| `building_type` | string | OPTIONAL | Lookup | Building type description from floor height lookup (e.g. `Single-family house`) |
 
 ---
 
@@ -253,11 +243,48 @@ area-estimator/
 
 ---
 
+## Floor Height Lookup
+
+Canton Zurich methodology (Seiler & Seiler, 2020). GF = ground floor, UF = upper floors.
+
+| Code | Building Type | Schema | GF (m) | UF (m) |
+|------|---------------|--------|--------|--------|
+| 1010 | Provisional shelter | GKAT | 2.70–3.30 | 2.70–3.30 |
+| 1030 | Residential with secondary use | GKAT | 2.70–3.30 | 2.70–3.30 |
+| 1040 | Partially residential | GKAT | 3.30–3.70 | 2.70–3.70 |
+| 1060 | Non-residential | GKAT | 3.30–5.00 | 3.00–5.00 |
+| 1080 | Special-purpose | GKAT | 3.00–4.00 | 3.00–4.00 |
+| 1110 | Single-family house | GKLAS | 2.70–3.30 | 2.70–3.30 |
+| 1121 | Two-family house | GKLAS | 2.70–3.30 | 2.70–3.30 |
+| 1122 | Multi-family house | GKLAS | 2.70–3.30 | 2.70–3.30 |
+| 1130 | Community residential | GKLAS | 2.70–3.30 | 2.70–3.30 |
+| 1211 | Hotel | GKLAS | 3.30–3.70 | 3.00–3.50 |
+| 1212 | Short-term accommodation | GKLAS | 3.00–3.50 | 3.00–3.50 |
+| 1220 | Office building | GKLAS | 3.40–4.20 | 3.40–4.20 |
+| 1230 | Wholesale and retail | GKLAS | 3.40–5.00 | 3.40–5.00 |
+| 1231 | Restaurants and bars | GKLAS | 3.30–4.00 | 3.30–4.00 |
+| 1241 | Stations and terminals | GKLAS | 4.00–6.00 | 4.00–6.00 |
+| 1242 | Parking garages | GKLAS | 2.80–3.20 | 2.80–3.20 |
+| 1251 | Industrial building | GKLAS | 4.00–7.00 | 4.00–7.00 |
+| 1252 | Tanks, silos, warehouses | GKLAS | 3.50–6.00 | 3.50–6.00 |
+| 1261 | Culture and leisure | GKLAS | 3.50–5.00 | 3.50–5.00 |
+| 1262 | Museums and libraries | GKLAS | 3.50–5.00 | 3.50–5.00 |
+| 1263 | Schools and universities | GKLAS | 3.30–4.00 | 3.30–4.00 |
+| 1264 | Hospitals and clinics | GKLAS | 3.30–4.00 | 3.30–4.00 |
+| 1265 | Sports halls | GKLAS | 3.00–6.00 | 3.00–6.00 |
+| 1271 | Agricultural buildings | GKLAS | 3.50–5.00 | 3.50–5.00 |
+| 1272 | Churches and religious buildings | GKLAS | 3.00–6.00 | 3.00–6.00 |
+| 1273 | Monuments and protected buildings | GKLAS | 3.00–4.00 | 3.00–4.00 |
+| 1274 | Other structures | GKLAS | 3.00–4.00 | 3.00–4.00 |
+| — | Default (unknown) | — | 2.70–3.30 | 2.70–3.30 |
+
+---
+
 ## References
 
 | Resource | Link |
 |----------|------|
-| Amtliche Vermessung | [geodienste.ch/services/av](https://www.geodienste.ch/services/av) |
+| Amtliche Vermessung (AV) | [geodienste.ch/services/av](https://www.geodienste.ch/services/av) |
 | swissALTI3D | [swisstopo.admin.ch](https://www.swisstopo.admin.ch/de/hoehenmodell-swissalti3d) |
 | swissSURFACE3D Raster | [swisstopo.admin.ch](https://www.swisstopo.admin.ch/de/hoehenmodell-swisssurface3d-raster) |
 | swisstopo STAC API | [data.geo.admin.ch/api/stac/v1](https://data.geo.admin.ch/api/stac/v1/) |
@@ -274,43 +301,3 @@ area-estimator/
 ## License
 
 MIT License — see [LICENSE](LICENSE).
-
----
-
-<details>
-<summary>Floor height lookup table — Canton Zurich methodology (Seiler & Seiler, 2020)</summary>
-
-EG = Erdgeschoss (ground floor), RG = Regelgeschoss (upper floors).
-
-| Code | Building Type | Schema | EG (m) | RG (m) |
-|------|---------------|--------|--------|--------|
-| 1010 | Provisorische Unterkunft | GKAT | 2.70–3.30 | 2.70–3.30 |
-| 1030 | Wohngebäude mit Nebennutzung | GKAT | 2.70–3.30 | 2.70–3.30 |
-| 1040 | Geb. mit teilw. Wohnnutzung | GKAT | 3.30–3.70 | 2.70–3.70 |
-| 1060 | Gebäude ohne Wohnnutzung | GKAT | 3.30–5.00 | 3.00–5.00 |
-| 1080 | Sonderbauten | GKAT | 3.00–4.00 | 3.00–4.00 |
-| 1110 | Einfamilienhaus | GKLAS | 2.70–3.30 | 2.70–3.30 |
-| 1121 | Zweifamilienhaus | GKLAS | 2.70–3.30 | 2.70–3.30 |
-| 1122 | Mehrfamilienhaus | GKLAS | 2.70–3.30 | 2.70–3.30 |
-| 1130 | Wohngebäude f. Gemeinschaften | GKLAS | 2.70–3.30 | 2.70–3.30 |
-| 1211 | Hotelgebäude | GKLAS | 3.30–3.70 | 3.00–3.50 |
-| 1212 | Kurzfristige Beherbergung | GKLAS | 3.00–3.50 | 3.00–3.50 |
-| 1220 | Bürogebäude | GKLAS | 3.40–4.20 | 3.40–4.20 |
-| 1230 | Gross- und Einzelhandel | GKLAS | 3.40–5.00 | 3.40–5.00 |
-| 1231 | Restaurants und Bars | GKLAS | 3.30–4.00 | 3.30–4.00 |
-| 1241 | Bahnhöfe, Terminals | GKLAS | 4.00–6.00 | 4.00–6.00 |
-| 1242 | Parkhäuser | GKLAS | 2.80–3.20 | 2.80–3.20 |
-| 1251 | Industriegebäude | GKLAS | 4.00–7.00 | 4.00–7.00 |
-| 1252 | Behälter, Silos, Lager | GKLAS | 3.50–6.00 | 3.50–6.00 |
-| 1261 | Kultur und Freizeit | GKLAS | 3.50–5.00 | 3.50–5.00 |
-| 1262 | Museen und Bibliotheken | GKLAS | 3.50–5.00 | 3.50–5.00 |
-| 1263 | Schulen und Hochschulen | GKLAS | 3.30–4.00 | 3.30–4.00 |
-| 1264 | Spitäler und Kliniken | GKLAS | 3.30–4.00 | 3.30–4.00 |
-| 1265 | Sporthallen | GKLAS | 3.00–6.00 | 3.00–6.00 |
-| 1271 | Landwirtschaftl. Betriebsgeb. | GKLAS | 3.50–5.00 | 3.50–5.00 |
-| 1272 | Kirchen und Sakralbauten | GKLAS | 3.00–6.00 | 3.00–6.00 |
-| 1273 | Denkmäler, geschützte Geb. | GKLAS | 3.00–4.00 | 3.00–4.00 |
-| 1274 | Andere Hochbauten | GKLAS | 3.00–4.00 | 3.00–4.00 |
-| — | Default (unknown) | — | 2.70–3.30 | 2.70–3.30 |
-
-</details>

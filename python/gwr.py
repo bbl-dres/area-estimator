@@ -79,7 +79,7 @@ def query_gwr_api(egid):
     """
     Query a single building's GWR data via the swisstopo REST API.
 
-    Uses the ch.bfs.gebaeude_wohnungs_register layer:
+    Uses the ch.bfs.gebaeude_wohnungs_register (building/dwelling register) layer:
     1. Search for the building by EGID
     2. Fetch full attributes by feature ID
 

@@ -2,12 +2,10 @@
 """
 Step 4 — Estimate Floor Areas
 
-Converts building volume to gross floor area (Geschossfläche) using
-building-type-specific floor heights from the GWR classification.
+Converts building volume to gross floor area using building-type-specific
+floor heights from the GWR classification.
 
-Based on the Canton Zurich methodology:
-"Modell zur Berechnung der bestehenden Geschossfläche pro Grundstück im
-Kanton Zürich" — SEILER & SEILER GmbH, December 2020.
+Based on the Canton Zurich methodology (Seiler & Seiler GmbH, Dec 2020).
 
 Uses height_minimal_m (volume / footprint) rather than height_mean_m for
 floor count estimation, as it represents the equivalent uniform box height
@@ -17,43 +15,43 @@ and handles complex roof shapes more consistently.
 import math
 
 # Floor height lookup table
-# Format: code -> (EG_min, EG_max, RG_min, RG_max, schema, description)
-# EG = Erdgeschoss (ground floor), RG = Regelgeschoss (regular floors)
+# Format: code -> (GF_min, GF_max, UF_min, UF_max, schema, description)
+# GF = ground floor, UF = upper floors
 FLOOR_HEIGHT_LOOKUP = {
     # GKAT-based (category)
-    '1010': (2.70, 3.30, 2.70, 3.30, 'GKAT', 'Provisorische Unterkunft'),
-    '1030': (2.70, 3.30, 2.70, 3.30, 'GKAT', 'Wohngebäude mit Nebennutzung'),
-    '1040': (3.30, 3.70, 2.70, 3.70, 'GKAT', 'Gebäude mit teilweiser Wohnnutzung'),
-    '1060': (3.30, 5.00, 3.00, 5.00, 'GKAT', 'Gebäude ohne Wohnnutzung'),
-    '1080': (3.00, 4.00, 3.00, 4.00, 'GKAT', 'Sonderbauten'),
+    '1010': (2.70, 3.30, 2.70, 3.30, 'GKAT', 'Provisional shelter'),
+    '1030': (2.70, 3.30, 2.70, 3.30, 'GKAT', 'Residential with secondary use'),
+    '1040': (3.30, 3.70, 2.70, 3.70, 'GKAT', 'Partially residential'),
+    '1060': (3.30, 5.00, 3.00, 5.00, 'GKAT', 'Non-residential'),
+    '1080': (3.00, 4.00, 3.00, 4.00, 'GKAT', 'Special-purpose'),
 
     # GKLAS-based (class) — Residential
-    '1110': (2.70, 3.30, 2.70, 3.30, 'GKLAS', 'Einfamilienhaus'),
-    '1121': (2.70, 3.30, 2.70, 3.30, 'GKLAS', 'Zweifamilienhaus'),
-    '1122': (2.70, 3.30, 2.70, 3.30, 'GKLAS', 'Mehrfamilienhaus'),
-    '1130': (2.70, 3.30, 2.70, 3.30, 'GKLAS', 'Wohngebäude für Gemeinschaften'),
+    '1110': (2.70, 3.30, 2.70, 3.30, 'GKLAS', 'Single-family house'),
+    '1121': (2.70, 3.30, 2.70, 3.30, 'GKLAS', 'Two-family house'),
+    '1122': (2.70, 3.30, 2.70, 3.30, 'GKLAS', 'Multi-family house'),
+    '1130': (2.70, 3.30, 2.70, 3.30, 'GKLAS', 'Community residential'),
 
     # GKLAS — Hotels and Tourism
-    '1211': (3.30, 3.70, 3.00, 3.50, 'GKLAS', 'Hotelgebäude'),
-    '1212': (3.00, 3.50, 3.00, 3.50, 'GKLAS', 'Kurzfristige Beherbergung'),
+    '1211': (3.30, 3.70, 3.00, 3.50, 'GKLAS', 'Hotel'),
+    '1212': (3.00, 3.50, 3.00, 3.50, 'GKLAS', 'Short-term accommodation'),
 
     # GKLAS — Commercial and Industrial
-    '1220': (3.40, 4.20, 3.40, 4.20, 'GKLAS', 'Bürogebäude'),
-    '1230': (3.40, 5.00, 3.40, 5.00, 'GKLAS', 'Gross- und Einzelhandel'),
-    '1231': (3.30, 4.00, 3.30, 4.00, 'GKLAS', 'Restaurants und Bars'),
-    '1241': (4.00, 6.00, 4.00, 6.00, 'GKLAS', 'Bahnhöfe, Terminals'),
-    '1242': (2.80, 3.20, 2.80, 3.20, 'GKLAS', 'Parkhäuser'),
-    '1251': (4.00, 7.00, 4.00, 7.00, 'GKLAS', 'Industriegebäude'),
-    '1252': (3.50, 6.00, 3.50, 6.00, 'GKLAS', 'Behälter, Silos, Lager'),
-    '1261': (3.50, 5.00, 3.50, 5.00, 'GKLAS', 'Kultur und Freizeit'),
-    '1262': (3.50, 5.00, 3.50, 5.00, 'GKLAS', 'Museen und Bibliotheken'),
-    '1263': (3.30, 4.00, 3.30, 4.00, 'GKLAS', 'Schulen und Hochschulen'),
-    '1264': (3.30, 4.00, 3.30, 4.00, 'GKLAS', 'Spitäler und Kliniken'),
-    '1265': (3.00, 6.00, 3.00, 6.00, 'GKLAS', 'Sporthallen'),
-    '1271': (3.50, 5.00, 3.50, 5.00, 'GKLAS', 'Landwirtschaftliche Betriebsgebäude'),
-    '1272': (3.00, 6.00, 3.00, 6.00, 'GKLAS', 'Kirchen und Sakralbauten'),
-    '1273': (3.00, 4.00, 3.00, 4.00, 'GKLAS', 'Denkmäler, geschützte Gebäude'),
-    '1274': (3.00, 4.00, 3.00, 4.00, 'GKLAS', 'Andere Hochbauten'),
+    '1220': (3.40, 4.20, 3.40, 4.20, 'GKLAS', 'Office building'),
+    '1230': (3.40, 5.00, 3.40, 5.00, 'GKLAS', 'Wholesale and retail'),
+    '1231': (3.30, 4.00, 3.30, 4.00, 'GKLAS', 'Restaurants and bars'),
+    '1241': (4.00, 6.00, 4.00, 6.00, 'GKLAS', 'Stations and terminals'),
+    '1242': (2.80, 3.20, 2.80, 3.20, 'GKLAS', 'Parking garages'),
+    '1251': (4.00, 7.00, 4.00, 7.00, 'GKLAS', 'Industrial building'),
+    '1252': (3.50, 6.00, 3.50, 6.00, 'GKLAS', 'Tanks, silos, warehouses'),
+    '1261': (3.50, 5.00, 3.50, 5.00, 'GKLAS', 'Culture and leisure'),
+    '1262': (3.50, 5.00, 3.50, 5.00, 'GKLAS', 'Museums and libraries'),
+    '1263': (3.30, 4.00, 3.30, 4.00, 'GKLAS', 'Schools and universities'),
+    '1264': (3.30, 4.00, 3.30, 4.00, 'GKLAS', 'Hospitals and clinics'),
+    '1265': (3.00, 6.00, 3.00, 6.00, 'GKLAS', 'Sports halls'),
+    '1271': (3.50, 5.00, 3.50, 5.00, 'GKLAS', 'Agricultural buildings'),
+    '1272': (3.00, 6.00, 3.00, 6.00, 'GKLAS', 'Churches and religious buildings'),
+    '1273': (3.00, 4.00, 3.00, 4.00, 'GKLAS', 'Monuments and protected buildings'),
+    '1274': (3.00, 4.00, 3.00, 4.00, 'GKLAS', 'Other structures'),
 }
 
 DEFAULT_FLOOR_HEIGHT = (2.70, 3.30, 2.70, 3.30, 'DEFAULT', 'Unknown/Fallback')
