@@ -22,7 +22,7 @@ Estimates building volumes and gross floor areas using publicly available Swiss 
 ```mermaid
 flowchart TD
     subgraph INPUT
-        A1[Building footprints<br><i>GeoPackage / Shapefile / GeoJSON / CSV</i>]
+        A1[Building input<br><i>CSV with coordinates</i>]
         A2[swissALTI3D tiles<br><i>terrain DTM, 0.5m</i>]
         A3[swissSURFACE3D tiles<br><i>surface DSM, 0.5m</i>]
     end
@@ -31,7 +31,7 @@ flowchart TD
     A2 --> S3
     A3 --> S3
 
-    S1["<b>Step 1 — Read Footprints</b><br>Geodata: read + filter to buildings<br>CSV: buffer points to 10×10 m<br>GeoJSON + AV: spatial containment match<br>All reprojected to LV95"]
+    S1["<b>Step 1 — Read Footprints</b><br>CSV: buffer points to 10×10 m<br>Reprojected to LV95"]
     S2["<b>Step 2 — Aligned 1×1m Grid</b><br>Minimum rotated rectangle orientation<br>Grid points filtered to footprint"]
     S3["<b>Step 3 — Volume & Heights</b><br>Sample DTM + DSM at each point<br>Volume = Σ max(surface_i − min(terrain), 0) × 1m²"]
     S4["<b>Step 4 — Floor Areas</b> <i>(optional)</i><br>GWR classification → floor height<br>Floors = height_minimal / floor_height<br>GFA = footprint × floors"]
@@ -57,22 +57,16 @@ flowchart TD
 
 | Argument | Required | Description |
 |----------|:--------:|-------------|
-| **Input** (one required) | | |
-| `--footprints FILE` | * | Geodata file (`.gpkg`, `.shp`, `.geojson`) from Amtliche Vermessung |
-| `--coordinates FILE` | * | CSV with `id`, `lon`, `lat` columns (WGS84); optionally `egid` |
-| `--geojson FILE` | * | GeoJSON with building addresses (Point + EGID) — requires `--av` |
+| **Input** | | |
+| `--coordinates FILE` | yes | CSV with `id`, `lon`, `lat` columns (WGS84); optionally `egid` |
 | **Elevation data** | | |
 | `--alti3d DIR` | yes | Directory with swissALTI3D GeoTIFF tiles |
 | `--surface3d DIR` | yes | Directory with swissSURFACE3D GeoTIFF tiles |
 | `--auto-fetch` | | Automatically download missing tiles from swisstopo |
-| **AV lookup** (for `--geojson`) | | |
-| `--av FILE` | with `--geojson` | AV GeoPackage (e.g. `av_2056.gpkg`) for footprint lookup |
-| `--av-layer NAME` | | AV layer name (default: `lcsf`) |
 | **Output** | | |
 | `-o, --output FILE` | | Output CSV file path (default: `data/output/result_<timestamp>.csv`) |
 | **Filters** | | |
 | `-l, --limit N` | | Process only the first N buildings |
-| `-b, --bbox MINLON MINLAT MAXLON MAXLAT` | | Bounding box in WGS84 (only with `--footprints`) |
 | **Area estimation** (off by default) | | |
 | `--estimate-area` | | Enable Step 4: floor area estimation |
 | `--gwr-csv FILE` | | GWR CSV from [housing-stat.ch](https://www.housing-stat.ch/de/data/supply/public.html); if omitted, uses swisstopo API |
@@ -85,30 +79,18 @@ flowchart TD
 pip install -r python/requirements.txt
 ```
 
-Minimal run — volume and heights only from a cadastral survey file:
-```bash
-python python/main.py \
-    --footprints data/land_cover.gpkg \
-    --alti3d data/swissalti3d \
-    --surface3d data/swisssurface3d
-```
-
-From a CSV of coordinates, with auto-fetch and floor area estimation:
+Minimal run — volume and heights only:
 ```bash
 python python/main.py \
     --coordinates my_buildings.csv \
     --alti3d data/swissalti3d \
-    --surface3d data/swisssurface3d \
-    --auto-fetch \
-    --estimate-area --gwr-csv data/gwr/buildings.csv \
-    -o results.csv
+    --surface3d data/swisssurface3d
 ```
 
-From a GeoJSON address list, resolved against an AV file:
+With auto-fetch and floor area estimation:
 ```bash
 python python/main.py \
-    --geojson addresses.geojson \
-    --av data/av_2056.gpkg \
+    --coordinates my_buildings.csv \
     --alti3d data/swissalti3d \
     --surface3d data/swisssurface3d \
     --auto-fetch \
@@ -124,10 +106,9 @@ python python/main.py \
 
 | Data | Format | Required | Download | Description |
 |------|--------|:--------:|----------|-------------|
-| Building input | `.gpkg` / `.shp` / `.geojson` / `.csv` | yes | — | One of: AV geodata (`--footprints`), WGS84 coordinate CSV (`--coordinates`), or GeoJSON points (`--geojson`) |
+| Building input | `.csv` | yes | — | CSV with building coordinates (`--coordinates`) |
 | swissALTI3D | GeoTIFF tiles (0.5 m) | yes | [swisstopo.admin.ch](https://www.swisstopo.admin.ch/de/hoehenmodell-swissalti3d) | Terrain elevation model (DTM). Can be auto-downloaded with `--auto-fetch`. |
 | swissSURFACE3D Raster | GeoTIFF tiles (0.5 m) | yes | [swisstopo.admin.ch](https://www.swisstopo.admin.ch/de/hoehenmodell-swisssurface3d-raster) | Surface elevation model (DSM). Can be auto-downloaded with `--auto-fetch`. |
-| Amtliche Vermessung (AV) | `.gpkg` | with `--geojson` | [geodienste.ch/services/av](https://geodienste.ch/services/av) | Cadastral survey footprints for spatial containment lookup. |
 | GWR (Federal Register of Buildings) | `.csv` | with `--estimate-area` | [housing-stat.ch/data](https://www.housing-stat.ch/de/data/supply/public.html) | Building classification for floor height lookup. Falls back to swisstopo API per EGID if omitted. |
 
 ### Input Columns
@@ -149,17 +130,14 @@ All results are written to a single CSV file (`result_<timestamp>.csv`).
 
 ### Step 1 — Footprints
 
-Resolves building polygons from [Amtliche Vermessung](https://www.geodienste.ch/services/av) and reprojects to LV95 (EPSG:2056).
+Buffers CSV coordinates into 10×10 m sampling polygons and reprojects to LV95 (EPSG:2056).
 
-Input columns are preserved in the output with `input_` prefix: `input_id`, `input_lon`, `input_lat` (+ `input_egid` in `--geojson` mode).
+Input columns are preserved in the output with `input_` prefix: `input_id`, `input_lon`, `input_lat`.
 
 | Column | Format | Required | Source | Description |
 |--------|--------|:--------:|--------|-------------|
-| `av_egid` | integer | no | AV | Federal building ID (`GWR_EGID`); `None` if unavailable |
-| `fid` | integer | yes | AV | Feature ID from GeoPackage; defaults to row index |
 | `area_footprint_m2` | float | yes | Computed | Footprint area from polygon geometry (m²) |
-| `area_official_m2` | float | no | AV | Official area from source attribute (m²) |
-| `status_step1` | string | yes | Computed | `ok` / `no_building_at_point` |
+| `status_step1` | string | yes | Computed | `ok` |
 
 ### Step 2 — Grid
 
