@@ -132,32 +132,16 @@ python python/main.py \
 
 ### Input Columns
 
-**`--footprints`** (geodata file)
+Expected columns in the user-provided buildings file (CSV, GeoJSON, or geodata).
 
 | Column | Description |
 |--------|-------------|
-| `egid` | Federal building ID (optional, auto-set to `None` if missing) |
-| `fid` | Feature ID (optional, defaults to row index) |
-| `geometry` | Building polygon |
-| `flaeche` / `area` / `shape_area` | Official footprint area in m² (optional, first match used) |
-| `bbart` / `art` / `type` / `objektart` | Building type — used to filter to `Gebaeude` (optional) |
-
-**`--coordinates`** (CSV)
-
-| Column | Description |
-|--------|-------------|
-| `lon` / `longitude` / `lng` / `x` | WGS84 longitude (required) |
-| `lat` / `latitude` / `y` | WGS84 latitude (required) |
+| `lon` / `longitude` / `lng` / `x` | WGS84 longitude — required for `--coordinates` |
+| `lat` / `latitude` / `y` | WGS84 latitude — required for `--coordinates` |
 | `egid` | Federal building ID (optional) |
 | `fid` | Feature ID (optional, defaults to row index) |
-
-**`--geojson`** (GeoJSON points)
-
-| Column | Description |
-|--------|-------------|
-| `geometry` | Point geometry in WGS84 (required) |
-| `bbl_id` | Building address ID → mapped to `input_id` (optional, defaults to feature index) |
-| `egid` | Reference EGID → mapped to `input_egid` (optional, authoritative EGID comes from AV) |
+| `bbl_id` | Building address ID — mapped to `input_id` in output (optional, `--geojson` only) |
+| `geometry` | Polygon (`--footprints`) or Point (`--geojson`) — read from geodata, not CSV |
 
 ---
 
