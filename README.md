@@ -33,7 +33,7 @@ flowchart TD
 
     S1["<b>Step 1 — Read Footprints</b><br>Geodata: read + filter to buildings<br>CSV: buffer points to 10×10 m<br>GeoJSON + AV: spatial containment match<br>All reprojected to LV95"]
     S2["<b>Step 2 — Aligned 1×1m Grid</b><br>Minimum rotated rectangle orientation<br>Grid points filtered to footprint"]
-    S3["<b>Step 3 — Volume & Heights</b><br>Sample DTM + DSM at each point<br>Volume = Σ max(surface − base, 0) × 1m²"]
+    S3["<b>Step 3 — Volume & Heights</b><br>Sample DTM + DSM at each point<br>Volume = Σ max(surface_i − min(terrain), 0) × 1m²"]
     S4["<b>Step 4 — Floor Areas</b> <i>(optional)</i><br>GWR classification → floor height<br>Floors = height_minimal / floor_height<br>GFA = footprint × floors"]
 
     S1 --> S2 --> S3 --> S4
@@ -124,7 +124,7 @@ python python/main.py \
 
 | Data | Format | Required | Download | Description |
 |------|--------|:--------:|----------|-------------|
-| Amtliche Vermessung (AV) | `.gpkg` / `.shp` / `.geojson` / `.csv` | yes | [geodienste.ch/services/av](https://geodienste.ch/services/av) | One of: AV geodata (`--footprints`), WGS84 coordinate CSV (`--coordinates`), or GeoJSON points with AV lookup (`--geojson` + `--av`) |
+| Building input | `.gpkg` / `.shp` / `.geojson` / `.csv` | yes | — | One of: AV geodata (`--footprints`), WGS84 coordinate CSV (`--coordinates`), or GeoJSON points (`--geojson`) |
 | swissALTI3D | GeoTIFF tiles (0.5 m) | yes | [swisstopo.admin.ch](https://www.swisstopo.admin.ch/de/hoehenmodell-swissalti3d) | Terrain elevation model (DTM). Can be auto-downloaded with `--auto-fetch`. |
 | swissSURFACE3D Raster | GeoTIFF tiles (0.5 m) | yes | [swisstopo.admin.ch](https://www.swisstopo.admin.ch/de/hoehenmodell-swisssurface3d-raster) | Surface elevation model (DSM). Can be auto-downloaded with `--auto-fetch`. |
 | Amtliche Vermessung (AV) | `.gpkg` | with `--geojson` | [geodienste.ch/services/av](https://geodienste.ch/services/av) | Cadastral survey footprints for spatial containment lookup. |
@@ -134,12 +134,12 @@ python python/main.py \
 
 Expected columns in the user-provided buildings CSV.
 
-| Column | Status | Description |
-|--------|--------|-------------|
-| `lon` | MUST | WGS84 longitude |
-| `lat` | MUST | WGS84 latitude |
-| `id` | MUST | Building ID — mapped to `input_id` in output |
-| `egid` | OPTIONAL | Federal building ID — used for GWR enrichment |
+| Column | Required | Description |
+|--------|----------|-------------|
+| `lon` | yes | WGS84 longitude |
+| `lat` | yes | WGS84 latitude |
+| `id` | yes | Building ID — mapped to `input_id` in output |
+| `egid` | no | Federal building ID — used for GWR enrichment if provided |
 
 ---
 
@@ -151,15 +151,15 @@ All results are written to a single CSV file (`result_<timestamp>.csv`).
 
 Resolves building polygons from [Amtliche Vermessung](https://www.geodienste.ch/services/av) and reprojects to LV95 (EPSG:2056).
 
-Input columns are preserved in the output with `input_` prefix: `input_id`, `input_egid`, `input_lon`, `input_lat`.
+Input columns are preserved in the output with `input_` prefix: `input_id`, `input_lon`, `input_lat` (+ `input_egid` in `--geojson` mode).
 
-| Column | Format | Status | Source | Description |
-|--------|--------|:------:|--------|-------------|
-| `av_egid` | integer | OPTIONAL | AV | Federal building ID (`GWR_EGID`); `None` if unavailable |
-| `fid` | integer | MUST | AV | Feature ID from GeoPackage; defaults to row index |
-| `area_footprint_m2` | float | MUST | Computed | Footprint area from polygon geometry (m²) |
-| `area_official_m2` | float | OPTIONAL | AV | Official area from source attribute (m²) |
-| `status_step1` | string | MUST | Computed | `ok` / `no_building_at_point` |
+| Column | Format | Required | Source | Description |
+|--------|--------|:--------:|--------|-------------|
+| `av_egid` | integer | no | AV | Federal building ID (`GWR_EGID`); `None` if unavailable |
+| `fid` | integer | yes | AV | Feature ID from GeoPackage; defaults to row index |
+| `area_footprint_m2` | float | yes | Computed | Footprint area from polygon geometry (m²) |
+| `area_official_m2` | float | no | AV | Official area from source attribute (m²) |
+| `status_step1` | string | yes | Computed | `ok` / `no_building_at_point` |
 
 ### Step 2 — Grid
 
@@ -173,33 +173,33 @@ Generates a building-oriented 1×1m sampling grid aligned to the minimum rotated
 
 Samples DTM and DSM elevations at each grid point to compute above-ground volume and height metrics.
 
-| Column | Format | Status | Source | Description |
-|--------|--------|:------:|--------|-------------|
-| `volume_above_ground_m3` | float | MUST | DTM + DSM | Above-ground volume: `Σ max(surface_i − min(terrain), 0) × 1m²` |
-| `elevation_base_m` | float | MUST | DTM | Lowest terrain point under footprint (m asl) — height reference |
-| `elevation_roof_base_m` | float | MUST | DSM | Lowest surface point in footprint — estimated eave (m asl) |
-| `height_mean_m` | float | MUST | DTM + DSM | Mean building height above base (m) |
-| `height_max_m` | float | MUST | DTM + DSM | Max building height above base — ridge (m) |
-| `height_minimal_m` | float | MUST | Computed | `volume / footprint_area` — equivalent uniform box height (m) |
-| `grid_points_count` | integer | MUST | Computed | Number of valid elevation sample points |
-| `status_step3` | string | MUST | Computed | `success` / `skipped` / `no_grid_points` / `no_height_data` / `error` |
+| Column | Format | Required | Source | Description |
+|--------|--------|:--------:|--------|-------------|
+| `volume_above_ground_m3` | float | yes | DTM + DSM | Above-ground volume: `Σ max(surface_i − min(terrain), 0) × 1m²` |
+| `elevation_base_m` | float | yes | DTM | Lowest terrain point under footprint (m asl) — height reference |
+| `elevation_roof_base_m` | float | yes | DSM | Lowest surface point in footprint — estimated eave (m asl) |
+| `height_mean_m` | float | yes | DTM + DSM | Mean building height above base (m) |
+| `height_max_m` | float | yes | DTM + DSM | Max building height above base — ridge (m) |
+| `height_minimal_m` | float | yes | Computed | `volume / footprint_area` — equivalent uniform box height (m) |
+| `grid_points_count` | integer | yes | Computed | Number of valid elevation sample points |
+| `status_step3` | string | yes | Computed | `success` / `skipped` / `no_grid_points` / `no_height_data` / `error` |
 
 ### Step 4 — Floor Areas _(optional, `--estimate-area`)_
 
 Estimates gross floor area from GWR building classification and `height_minimal_m`. Based on the [Canton Zurich methodology](https://are.zh.ch/) (Seiler & Seiler, 2020). Floor height lookup priority: GKLAS → GKAT → default 2.70–3.30 m.
 
-| Column | Format | Status | Source | Description |
-|--------|--------|:------:|--------|-------------|
-| `gkat` | integer | OPTIONAL | GWR | Building category code |
-| `gklas` | integer | OPTIONAL | GWR | Building class code |
-| `gbauj` | integer | OPTIONAL | GWR | Construction year |
-| `gastw` | integer | OPTIONAL | GWR | Number of stories |
-| `floor_height_used_m` | float | OPTIONAL | Lookup | Floor height applied (m) |
-| `floors_estimated` | float | OPTIONAL | Computed | Estimated floor count |
-| `area_floor_total_m2` | float | OPTIONAL | Computed | Gross floor area — `footprint × floors` (m²) |
-| `area_accuracy` | string | OPTIONAL | Computed | `high` (±10–15%) / `medium` (±15–25%) / `low` (±25–40%) |
-| `building_type` | string | OPTIONAL | Lookup | Building type description from floor height lookup (e.g. `Single-family house`) |
-| `status_step4` | string | OPTIONAL | Computed | `success` / `skipped` / `no_volume` / `height_exceeds_200m` |
+| Column | Format | Required | Source | Description |
+|--------|--------|:--------:|--------|-------------|
+| `gkat` | integer | no, from GWR | GWR | Building category code |
+| `gklas` | integer | no, from GWR | GWR | Building class code |
+| `gbauj` | integer | no, from GWR | GWR | Construction year |
+| `gastw` | integer | no, from GWR | GWR | Number of stories |
+| `floor_height_used_m` | float | yes | Lookup | Floor height applied (m) |
+| `floors_estimated` | float | yes | Computed | Estimated floor count |
+| `area_floor_total_m2` | float | yes | Computed | Gross floor area — `footprint × floors` (m²) |
+| `area_accuracy` | string | yes | Computed | `high` (±10–15%) / `medium` (±15–25%) / `low` (±25–40%) |
+| `building_type` | string | yes | Lookup | Building type description from floor height lookup (e.g. `Single-family house`) |
+| `status_step4` | string | yes | Computed | `success` / `skipped` / `no_volume` / `height_exceeds_200m` |
 
 ---
 
