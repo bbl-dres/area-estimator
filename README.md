@@ -82,7 +82,7 @@ flowchart TD
 | `-o, --output FILE` | | Output CSV file path (default: `data/output/result_<timestamp>.csv`) |
 | **Filters** | | |
 | `-l, --limit N` | | Process only the first N buildings |
-| `-b, --bbox MIN_LON MIN_LAT MAX_LON MAX_LAT` | | Bounding box filter in WGS84 (only with `--footprints`) |
+| `-b, --bbox MIN_LON MIN_LAT MAX_LON MAX_LAT` | | Bounding box filter in WGS84 (only in all-buildings mode, i.e. without `--coordinates`) |
 | **Area estimation** (off by default) | | |
 | `--estimate-area` | | Enable Step 4: floor area estimation |
 | `--gwr-csv FILE` | | GWR CSV from [housing-stat.ch](https://www.housing-stat.ch/de/data/supply/public.html); if omitted, uses swisstopo API |
@@ -205,7 +205,7 @@ Two modes, automatically selected based on which flags are provided:
 
 | Column | Format | Required | Source | Description |
 |--------|--------|:--------:|--------|-------------|
-| `area_footprint_m2` | float | yes | Computed | Footprint area from polygon geometry (m²) |
+| `area_official_m2` | float | no | AV source | Official area from AV source data (m²); `null` in CSV-only mode |
 | `status_step1` | string | yes | Computed | `ok` / `no_footprint` |
 
 ### Step 2 — Grid
@@ -218,10 +218,11 @@ Fills each building footprint with a 1×1 m grid of sample points. The grid is r
 
 ### Step 3 — Volume & Heights
 
-At each 1×1 m grid point, the tool reads two elevations: the ground level (DTM) and the surface level including buildings/trees (DSM). The difference gives the above-ground height at that point. Negative differences (e.g. from data noise) are clamped to zero. Volume is the sum of all those heights (each representing 1 m²).
+At each 1×1 m grid point, the tool reads two elevations: the ground level (DTM) and the surface level including buildings/trees (DSM). The above-ground height at each point is measured from the lowest terrain elevation under the building (`elevation_base_min_m`) as a flat horizontal datum — `max(surface_i − min(terrain), 0)`. This keeps the base plane consistent across sloped sites. Volume is the sum of all those heights, each representing 1 m².
 
 | Column | Format | Required | Source | Description |
 |--------|--------|:--------:|--------|-------------|
+| `area_footprint_m2` | float | yes | Computed | Footprint area computed from AV polygon geometry (m²) |
 | `volume_above_ground_m3` | float | yes | DTM + DSM | Total above-ground volume: `Σ max(surface_i − min(terrain), 0) × 1 m²` — measured from the lowest ground point as a flat base datum |
 | `elevation_base_min_m` | float | yes | DTM | Lowest ground elevation under the building — used as the volume base datum (m a.s.l.) |
 | `elevation_base_mean_m` | float | yes | DTM | Mean ground elevation under the building (m a.s.l.) |
