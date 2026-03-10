@@ -36,7 +36,8 @@
       "Bash(python python/main.py --coordinates data/buildings.csv --alti3d \"D:/SwissAlti3D\" --surface3d \"D:/swissSURFACE3D Raster\" --estimate-area --gwr-csv data/gwr/gebaeude_batiment_edificio.csv -o data/output/results.csv)",
       "Bash(python python/main.py --coordinates data/buildings.csv --alti3d \"D:/SwissAlti3D\" --surface3d \"D:/swissSURFACE3D Raster\" -o data/output/results.csv)",
       "Bash(python python/main.py --coordinates data/buildings.csv --alti3d \"D:/SwissAlti3D\" --surface3d \"D:/swissSURFACE3D Raster\" --auto-fetch -o data/output/results.csv)",
-      "Bash(python main.py --coordinates \"../data/buildings.csv\" --alti3d \"D:\\\\SwissAlti3D\" --surface3d \"D:\\\\swissSURFACE3D Raster\" --auto-fetch)"
+      "Bash(python main.py --coordinates \"../data/buildings.csv\" --alti3d \"D:\\\\SwissAlti3D\" --surface3d \"D:\\\\swissSURFACE3D Raster\" --auto-fetch)",
+      "Bash(python main.py --footprints \"D:\\\\AV_lv95\\\\av_2056.gpkg\" --coordinates \"../data/buildings.csv\" --alti3d \"D:\\\\SwissAlti3D\" --surface3d \"D:\\\\swissSURFACE3D Raster\" --auto-fetch)"
     ]
   }
 }

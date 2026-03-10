@@ -37,7 +37,7 @@ flowchart TD
 
     S1["<b>Step 1 — Read Footprints</b><br>AV only: all building polygons<br>AV + CSV: spatial join → AV polygon per point<br>Reprojected to LV95"]
     S2["<b>Step 2 — Aligned 1×1m Grid</b><br>Minimum rotated rectangle orientation<br>Grid points filtered to footprint"]
-    S3["<b>Step 3 — Volume & Heights</b><br>Sample DTM + DSM at each point<br>Volume = Σ max(surface_i − terrain_i, 0) × 1m²"]
+    S3["<b>Step 3 — Volume & Heights</b><br>Sample DTM + DSM at each point<br>Volume = Σ max(surface_i − min(terrain), 0) × 1m²"]
     S4["<b>Step 4 — Floor Areas</b> <i>(optional)</i><br>GWR classification → floor height<br>Floors = height_minimal / floor_height<br>GFA = footprint × floors"]
 
     S1 --> S2 --> S3 --> S4
@@ -163,7 +163,7 @@ python python/main.py \
 
 | Data | Format | Required | Download | Description |
 |------|--------|:--------:|----------|-------------|
-| AV footprints | GeoPackage / Shapefile / GeoJSON | yes | [geodienste.ch/services/av](https://www.geodienste.ch/services/av) | Building polygons from Amtliche Vermessung (`--footprints`) |
+| AV footprints | GeoPackage | yes | [geodienste.ch/services/av](https://www.geodienste.ch/services/av) | Building polygons from Amtliche Vermessung (`--footprints`). Layer `lcsf`, filtered to `Art = Gebaeude`. |
 | Building coordinates | `.csv` | no | — | List of points for spatial join against AV (`--coordinates`); omit to process all buildings in the AV file |
 | swissALTI3D | GeoTIFF tiles (0.5 m) | yes | [swisstopo.admin.ch](https://www.swisstopo.admin.ch/de/hoehenmodell-swissalti3d) | Terrain elevation model (DTM). Can be auto-downloaded with `--auto-fetch`. |
 | swissSURFACE3D Raster | GeoTIFF tiles (0.5 m) | yes | [swisstopo.admin.ch](https://www.swisstopo.admin.ch/de/hoehenmodell-swisssurface3d-raster) | Surface elevation model (DSM). Can be auto-downloaded with `--auto-fetch`. |
@@ -212,14 +212,18 @@ At each 1×1 m grid point, the tool reads two elevations: the ground level (DTM)
 
 | Column | Format | Required | Source | Description |
 |--------|--------|:--------:|--------|-------------|
-| `volume_above_ground_m3` | float | yes | DTM + DSM | Total above-ground volume: sum of per-cell `max(surface − terrain, 0) × 1 m²` |
-| `elevation_base_m` | float | yes | DTM | Lowest ground elevation under the building (meters above sea level) |
-| `elevation_roof_base_m` | float | yes | DSM | Lowest surface elevation within footprint — typically the roof's lower edge / eave (meters above sea level) |
-| `height_mean_m` | float | yes | DTM + DSM | Average above-ground height across all grid points (m) |
+| `volume_above_ground_m3` | float | yes | DTM + DSM | Total above-ground volume: `Σ max(surface_i − min(terrain), 0) × 1 m²` — measured from the lowest ground point as a flat base datum |
+| `elevation_base_min_m` | float | yes | DTM | Lowest ground elevation under the building — used as the volume base datum (m a.s.l.) |
+| `elevation_base_mean_m` | float | yes | DTM | Mean ground elevation under the building (m a.s.l.) |
+| `elevation_base_max_m` | float | yes | DTM | Highest ground elevation under the building (m a.s.l.) |
+| `elevation_roof_min_m` | float | yes | DSM | Lowest surface elevation within footprint — typically the eave / gutter (m a.s.l.) |
+| `elevation_roof_mean_m` | float | yes | DSM | Mean surface elevation within footprint (m a.s.l.) |
+| `elevation_roof_max_m` | float | yes | DSM | Highest surface elevation within footprint — typically the ridge (m a.s.l.) |
+| `height_mean_m` | float | yes | DTM + DSM | Average above-ground height across all grid points, measured from `elevation_base_min_m` (m) |
 | `height_max_m` | float | yes | DTM + DSM | Tallest above-ground point — usually the roof ridge (m) |
 | `height_minimal_m` | float | yes | Computed | `volume ÷ footprint area` — the height a simple box with the same footprint would need to match the building's volume (m) |
 | `grid_points_count` | integer | yes | Computed | Number of grid points where both DTM and DSM data were available |
-| `status_step3` | string | yes | Computed | `success` / `skipped` / `no_grid_points` / `no_height_data` / `error` |
+| `status_step3` | string | yes | Computed | `success` / `skipped:<status_step1>` (e.g. `skipped:no_footprint`) / `no_grid_points` / `no_height_data` / `error` |
 
 ### Step 4 — Floor Areas _(optional, `--estimate-area`)_
 
@@ -251,7 +255,8 @@ Estimates gross floor area by dividing building height by a typical floor height
 | Mixed-use buildings | A single floor height is applied per building; actual floor heights may vary (e.g. retail ground floor + residential upper floors) |
 | Industrial / special buildings | Floor height ranges are wide (4–7 m), so floor count estimates are less reliable |
 | Data timing | The elevation model may have been captured before or after the building was constructed or modified |
-| Roof base estimation | `elevation_roof_base_m` picks the lowest surface point, which may hit ground-level features (overhangs, passages) rather than the actual roof edge |
+| Roof eave estimation | `elevation_roof_min_m` picks the lowest surface point, which may hit ground-level features (overhangs, passages) rather than the actual roof edge |
+| Sloped terrain | Volume is measured from `elevation_base_min_m` (the lowest terrain point) as a flat datum. On steeply sloped sites, this includes terrain undulation between the low and high sides of the building. |
 
 ---
 

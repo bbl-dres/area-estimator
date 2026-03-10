@@ -7,8 +7,12 @@ grid point, then calculates building volume and all height metrics.
 
 Outputs per building:
 - volume_above_ground_m3
-- elevation_base_m        (min terrain under building)
-- elevation_roof_base_m   (min surface within footprint — estimated eave)
+- elevation_base_min_m    (min terrain under building — used as volume base datum)
+- elevation_base_mean_m   (mean terrain elevation under building)
+- elevation_base_max_m    (max terrain elevation under building)
+- elevation_roof_min_m    (min surface elevation within footprint — estimated eave)
+- elevation_roof_mean_m   (mean surface elevation within footprint)
+- elevation_roof_max_m    (max surface elevation within footprint — estimated ridge)
 - height_mean_m           (mean of building heights at grid points)
 - height_max_m            (max building height)
 - height_minimal_m        (volume / footprint — equivalent uniform box height)
@@ -25,7 +29,7 @@ from tile_fetcher import tile_ids_from_bounds
 log = logging.getLogger(__name__)
 
 # LRU-style tile cache limit (each open tile = one file handle)
-MAX_CACHED_TILES = 50
+MAX_CACHED_TILES = 200
 
 
 class TileIndex:
@@ -93,8 +97,9 @@ class TileIndex:
         """
         Sample height values from raster tiles at given points.
 
-        Only samples points that fall within each tile's bounds to avoid
-        unnecessary raster reads.
+        Uses a single windowed read per tile instead of point-by-point sampling:
+        converts all points to pixel row/col indices, reads the minimal bounding
+        window in one IO call, then indexes into the resulting numpy array.
 
         Args:
             points: List of (x, y) tuples in LV95
@@ -136,13 +141,35 @@ class TileIndex:
                 if not mask.any():
                     continue
 
-                tile_points = [tuple(p) for p in points_arr[mask]]
+                tile_pts = points_arr[mask]
                 indices = np.where(mask)[0]
 
-                sampled = list(src.sample(tile_points, indexes=1))
-                for idx, value in zip(indices, sampled):
-                    if not np.isnan(value[0]) and value[0] != src.nodata:
-                        heights[idx] = value[0]
+                # Convert LV95 coordinates to pixel row/col indices
+                rows, cols = rasterio.transform.rowcol(
+                    src.transform, tile_pts[:, 0], tile_pts[:, 1]
+                )
+                rows = np.clip(np.asarray(rows), 0, src.height - 1)
+                cols = np.clip(np.asarray(cols), 0, src.width - 1)
+
+                # Read the minimal bounding window in a single IO call
+                row_min, row_max = int(rows.min()), int(rows.max())
+                col_min, col_max = int(cols.min()), int(cols.max())
+                window = rasterio.windows.Window(
+                    col_min, row_min,
+                    col_max - col_min + 1,
+                    row_max - row_min + 1,
+                )
+                data = src.read(1, window=window).astype(float)
+
+                # Index into the window and apply nodata mask
+                values = data[rows - row_min, cols - col_min]
+                nodata = src.nodata
+                valid = ~np.isnan(values)
+                if nodata is not None:
+                    valid &= values != float(nodata)
+
+                heights[indices[valid]] = values[valid]
+
             except Exception as e:
                 log.debug(f"Error sampling from {tile_id}: {e}")
 
@@ -199,8 +226,12 @@ def calculate_building_volume(polygon, tile_index, av_egid=None, fid=None,
         'area_footprint_m2': round(footprint_area, 2),
         'area_official_m2': area_official_m2,
         'volume_above_ground_m3': 0,
-        'elevation_base_m': np.nan,
-        'elevation_roof_base_m': np.nan,
+        'elevation_base_min_m': np.nan,
+        'elevation_base_mean_m': np.nan,
+        'elevation_base_max_m': np.nan,
+        'elevation_roof_min_m': np.nan,
+        'elevation_roof_mean_m': np.nan,
+        'elevation_roof_max_m': np.nan,
         'height_mean_m': 0,
         'height_max_m': 0,
         'height_minimal_m': 0,
@@ -230,16 +261,20 @@ def calculate_building_volume(polygon, tile_index, av_egid=None, fid=None,
             return {**empty_result, 'grid_points_count': len(grid_points),
                     'status_step3': 'no_height_data'}
 
-        # Base height = lowest terrain point under building (for reference)
-        base_height = np.min(valid_terrain)
+        # Terrain (base) elevation statistics
+        base_min = np.min(valid_terrain)
+        base_mean = np.mean(valid_terrain)
+        base_max = np.max(valid_terrain)
 
-        # Roof base = lowest surface point within footprint (estimated eave)
-        roof_base = np.min(valid_surface)
+        # Roof surface elevation statistics
+        roof_min = np.min(valid_surface)
+        roof_mean = np.mean(valid_surface)
+        roof_max = np.max(valid_surface)
 
-        # Building heights: per-point difference between surface and terrain
-        # This correctly handles sloped terrain by computing the true
-        # above-ground height at each grid cell
-        building_heights = np.maximum(valid_surface - valid_terrain, 0)
+        # Building heights measured from the lowest terrain point (flat base datum).
+        # Using base_min ensures volume is referenced to a consistent horizontal
+        # plane, which is stable on sloped terrain.
+        building_heights = np.maximum(valid_surface - base_min, 0)
 
         # Volume = sum of heights × cell area
         volume = np.sum(building_heights) * (voxel_size ** 2)
@@ -255,8 +290,12 @@ def calculate_building_volume(polygon, tile_index, av_egid=None, fid=None,
             'area_footprint_m2': round(footprint_area, 2),
             'area_official_m2': area_official_m2,
             'volume_above_ground_m3': round(volume, 2),
-            'elevation_base_m': round(base_height, 2),
-            'elevation_roof_base_m': round(roof_base, 2),
+            'elevation_base_min_m': round(base_min, 2),
+            'elevation_base_mean_m': round(base_mean, 2),
+            'elevation_base_max_m': round(base_max, 2),
+            'elevation_roof_min_m': round(roof_min, 2),
+            'elevation_roof_mean_m': round(roof_mean, 2),
+            'elevation_roof_max_m': round(roof_max, 2),
             'height_mean_m': round(height_mean, 2),
             'height_max_m': round(height_max, 2),
             'height_minimal_m': round(height_minimal, 2),

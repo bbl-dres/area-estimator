@@ -206,10 +206,13 @@ def main():
                 result = {
                     'av_egid': row.get('av_egid'), 'fid': row.get('fid'),
                     'area_footprint_m2': None, 'area_official_m2': None,
-                    'volume_above_ground_m3': None, 'elevation_base_m': None,
-                    'elevation_roof_base_m': None, 'height_mean_m': None,
+                    'volume_above_ground_m3': None,
+                    'elevation_base_min_m': None, 'elevation_base_mean_m': None,
+                    'elevation_base_max_m': None,
+                    'elevation_roof_min_m': None, 'elevation_roof_mean_m': None,
+                    'elevation_roof_max_m': None, 'height_mean_m': None,
                     'height_max_m': None, 'height_minimal_m': None,
-                    'grid_points_count': None, 'status_step3': 'skipped',
+                    'grid_points_count': None, 'status_step3': f"skipped:{row['status_step1']}",
                 }
             else:
                 result = calculate_building_volume(

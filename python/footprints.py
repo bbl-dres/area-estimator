@@ -27,6 +27,13 @@ POINT_BUFFER_M = 5.0
 # WGS84 → LV95 transformer (reused across calls)
 _wgs84_to_lv95 = Transformer.from_crs("EPSG:4326", "EPSG:2056", always_xy=True)
 
+# Layer name for building polygons in Swiss AV GeoPackages (Bodenbedeckungsflaeche)
+AV_BUILDING_LAYER = 'lcsf'
+# Art value for buildings within the lcsf layer
+AV_BUILDING_TYPE = 'Gebaeude'
+# Buffer (m) around each point's bbox when querying AV in spatial join mode
+AV_POINT_BBOX_BUFFER_M = 200
+
 
 def load_footprints_from_file(filepath, bbox=None, limit=None):
     """
@@ -37,6 +44,7 @@ def load_footprints_from_file(filepath, bbox=None, limit=None):
 
     Returns GeoDataFrame in LV95 with columns: av_egid, fid, area_official_m2, geometry, status_step1
     """
+    log.info(f"Loading AV from {Path(filepath).name} (layer: {AV_BUILDING_LAYER}, Art={AV_BUILDING_TYPE})...")
     gdf = _load_av_buildings(filepath, bbox_lv95=bbox)
 
     if len(gdf) == 0:
@@ -47,7 +55,7 @@ def load_footprints_from_file(filepath, bbox=None, limit=None):
         gdf = gdf.head(limit)
 
     gdf['status_step1'] = 'ok'
-    log.info(f"Loaded {len(gdf)} building footprints")
+    log.info(f"  {len(gdf)} building footprints loaded")
     return gdf[['av_egid', 'fid', 'area_official_m2', 'geometry', 'status_step1']]
 
 
@@ -100,6 +108,7 @@ def load_coordinates_from_csv(csv_path, limit=None):
 def _load_av_buildings(av_path, bbox_lv95=None):
     """
     Internal helper: load and normalise an AV GeoPackage/Shapefile/GeoJSON.
+    For GeoPackages, always reads the AV_BUILDING_LAYER ('lcsf').
     Returns a GeoDataFrame in LV95 with columns: av_egid, fid, area_official_m2, geometry.
     bbox_lv95: (minx, miny, maxx, maxy) in LV95 to pre-filter the file read.
     """
@@ -107,8 +116,13 @@ def _load_av_buildings(av_path, bbox_lv95=None):
     if not av_path.exists():
         raise FileNotFoundError(f"AV file not found: {av_path}")
 
-    log.info(f"Loading AV from {av_path.name}...")
-    gdf = gpd.read_file(av_path, bbox=bbox_lv95) if bbox_lv95 else gpd.read_file(av_path)
+    kwargs = {}
+    if bbox_lv95:
+        kwargs['bbox'] = bbox_lv95
+    if av_path.suffix.lower() == '.gpkg':
+        kwargs['layer'] = AV_BUILDING_LAYER
+
+    gdf = gpd.read_file(av_path, **kwargs)
 
     if len(gdf) == 0:
         return gpd.GeoDataFrame(columns=['av_egid', 'fid', 'area_official_m2', 'geometry'],
@@ -116,18 +130,16 @@ def _load_av_buildings(av_path, bbox_lv95=None):
 
     gdf.columns = [c.lower() for c in gdf.columns]
 
-    # Filter to buildings where a type column exists
-    for type_col in ['bbart', 'art', 'type', 'objektart']:
-        if type_col in gdf.columns:
-            mask = gdf[type_col].astype(str).str.lower().str.contains(
-                'gebaeude|gebäude|building', na=False
-            )
-            if mask.any():
-                gdf = gdf[mask].copy()
-                break
+    # Filter to buildings: Art = AV_BUILDING_TYPE ('Gebaeude')
+    if 'art' in gdf.columns:
+        gdf = gdf[gdf['art'] == AV_BUILDING_TYPE].copy()
+    elif 'bbart' in gdf.columns:
+        gdf = gdf[gdf['bbart'] == AV_BUILDING_TYPE].copy()
 
-    if 'egid' in gdf.columns:
-        gdf = gdf.rename(columns={'egid': 'av_egid'})
+    # AV GeoPackage (lcsf) uses GWR_EGID; other sources may use egid
+    egid_col = next((c for c in gdf.columns if c in ('gwr_egid', 'egid')), None)
+    if egid_col:
+        gdf = gdf.rename(columns={egid_col: 'av_egid'})
         gdf['av_egid'] = pd.to_numeric(gdf['av_egid'], errors='coerce')
     else:
         gdf['av_egid'] = None
@@ -136,14 +148,17 @@ def _load_av_buildings(av_path, bbox_lv95=None):
         gdf['fid'] = gdf.index.astype(str)
 
     area_col = next((c for c in gdf.columns if c in ('flaeche', 'area', 'shape_area')), None)
-    gdf['area_official_m2'] = pd.to_numeric(gdf[area_col], errors='coerce') if area_col else None
+    if area_col:
+        gdf['area_official_m2'] = pd.to_numeric(gdf[area_col], errors='coerce')
+    else:
+        # Compute from geometry (valid since we are already in a metric CRS)
+        gdf['area_official_m2'] = gdf.geometry.area.round(2)
 
     if gdf.crs is None:
         gdf = gdf.set_crs('EPSG:2056')
     elif gdf.crs.to_epsg() != 2056:
         gdf = gdf.to_crs('EPSG:2056')
 
-    log.info(f"  {len(gdf)} building footprints loaded")
     return gdf[['av_egid', 'fid', 'area_official_m2', 'geometry']].reset_index(drop=True)
 
 
@@ -196,46 +211,40 @@ def load_footprints_from_av_with_csv_filter(av_path, csv_path, limit=None):
         crs='EPSG:4326',
     ).to_crs('EPSG:2056')
 
-    # Bounding box (+ 500 m buffer) for efficient AV load
-    b = pts.total_bounds
-    av_bbox = (b[0] - 500, b[1] - 500, b[2] + 500, b[3] + 500)
+    n = len(pts)
+    log.info(f"  Point-by-point spatial join: {n} points  "
+             f"(AV: {Path(av_path).name}, layer={AV_BUILDING_LAYER}, "
+             f"bbox buffer={AV_POINT_BBOX_BUFFER_M}m)")
 
-    # ── Load AV ───────────────────────────────────────────────────────────
-    av = _load_av_buildings(av_path, bbox_lv95=av_bbox)
-    if len(av) == 0:
-        log.warning("No AV buildings found in bounding box — loading full file")
-        av = _load_av_buildings(av_path)
-
-    # ── Spatial join ──────────────────────────────────────────────────────
-    joined = gpd.sjoin(
-        pts[['geometry']],
-        av[['av_egid', 'fid', 'area_official_m2', 'geometry']],
-        how='left',
-        predicate='within',
-    )
-    # Keep first match per point (a point very rarely falls in >1 polygon)
-    joined = joined[~joined.index.duplicated(keep='first')]
-
-    matched_n = joined['fid'].notna().sum()
-    no_match_n = joined['fid'].isna().sum()
-    log.info(f"  Matched: {matched_n}/{len(pts)}  |  No polygon: {no_match_n}")
-
-    # ── Build result GeoDataFrame ─────────────────────────────────────────
+    # ── Process point by point ────────────────────────────────────────────
     records = []
-    for idx, row in pts.iterrows():
-        j = joined.loc[idx]
-        if pd.notna(j['fid']):
+    matched = 0
+    no_match = 0
+
+    for i, (_, row) in enumerate(pts.iterrows()):
+        pt = row.geometry
+        bbox = (pt.x - AV_POINT_BBOX_BUFFER_M, pt.y - AV_POINT_BBOX_BUFFER_M,
+                pt.x + AV_POINT_BBOX_BUFFER_M, pt.y + AV_POINT_BBOX_BUFFER_M)
+
+        local_av = _load_av_buildings(av_path, bbox_lv95=bbox)
+
+        # Find the polygon(s) containing this point
+        hit = local_av[local_av.geometry.contains(pt)]
+
+        if len(hit) > 0:
+            av_row = hit.iloc[0]
             records.append({
                 'input_id': row['input_id'],
                 'input_egid': row['input_egid'],
                 'input_lon': row['input_lon'],
                 'input_lat': row['input_lat'],
-                'av_egid': j['av_egid'],
-                'fid': j['fid'],
-                'area_official_m2': j['area_official_m2'],
-                'geometry': av.at[j['index_right'], 'geometry'],
+                'av_egid': av_row['av_egid'],
+                'fid': av_row['fid'],
+                'area_official_m2': av_row['area_official_m2'],
+                'geometry': av_row['geometry'],
                 'status_step1': 'ok',
             })
+            matched += 1
         else:
             records.append({
                 'input_id': row['input_id'],
@@ -248,6 +257,12 @@ def load_footprints_from_av_with_csv_filter(av_path, csv_path, limit=None):
                 'geometry': None,
                 'status_step1': 'no_footprint',
             })
+            no_match += 1
 
+        if (i + 1) % 100 == 0 or (i + 1) == n:
+            log.info(f"  [{i+1}/{n}] {(i+1)/n*100:.0f}%  "
+                     f"matched: {matched}  no_footprint: {no_match}")
+
+    log.info(f"  Total: {matched} matched, {no_match} no_footprint")
     return gpd.GeoDataFrame(records, crs='EPSG:2056')
 
