@@ -206,7 +206,7 @@ Expected columns in the user-provided buildings CSV (`--coordinates`).
 | `id` | yes | Building ID — preserved as `id` in output |
 | `lon` | yes | WGS84 longitude |
 | `lat` | yes | WGS84 latitude |
-| `egid` | no | Federal building ID — mapped to `av_egid` for GWR enrichment |
+| `egid` | no | Federal building ID — preserved as `egid` in output; used directly for GWR enrichment in Step 4 |
 
 When using `--footprints`, the tool reads building polygons directly from the geodata file. The `egid` column (if present) is mapped to `av_egid`. Building type filtering (`Gebaeude`) is applied automatically.
 
@@ -218,8 +218,8 @@ All results are written to a single CSV file (`result_<timestamp>.csv`).
 
 ### Step 1 — Footprints
 
-- **CSV mode** (`--coordinates`): Buffers each point into a 10×10 m sampling polygon and reprojects to LV95. The `id` column is preserved; `egid` is mapped to `av_egid`.
-- **Geodata mode** (`--footprints`): Loads building polygons directly, filters to buildings (`Gebaeude`), and ensures LV95 projection. The `egid` column is mapped to `av_egid`; a `fid` is assigned from the source feature ID.
+- **CSV mode** (`--coordinates`): Each lat/lon point is converted to Swiss coordinates (LV95) and turned into a 10×10 m square, giving the tool an area to sample heights from. Your `id` and `egid` columns carry through to the output as-is. The `egid` (if provided) is used for GWR lookup in Step 4.
+- **Geodata mode** (`--footprints`): Loads building polygons directly and filters to buildings (looks for `Gebaeude` / `building` in the type column). Converts to Swiss coordinates (LV95) if needed. The `egid` column (if present) is renamed to `av_egid`; each feature gets a `fid` from its source ID.
 
 | Column | Format | Required | Source | Description |
 |--------|--------|:--------:|--------|-------------|
@@ -228,7 +228,7 @@ All results are written to a single CSV file (`result_<timestamp>.csv`).
 
 ### Step 2 — Grid
 
-Generates a building-oriented 1×1m sampling grid aligned to the minimum rotated rectangle of the footprint. No columns added to output CSV — grid points are consumed internally by Step 3.
+Fills each building footprint with a 1×1 m grid of sample points. The grid is rotated to align with the building's longest edge (using the minimum bounding rectangle), so it fits tightly even for angled buildings. These grid points are used internally by Step 3 — no columns are added to the output CSV.
 
 <p align="center">
   <img src="images/Oriented_Grid.jpg" width="70%" />
@@ -236,34 +236,34 @@ Generates a building-oriented 1×1m sampling grid aligned to the minimum rotated
 
 ### Step 3 — Volume & Heights
 
-Samples DTM (terrain) and DSM (surface) elevations at each 1×1 m grid cell. The above-ground height at each cell is `max(surface − terrain, 0)`, and volume is the sum of all cell heights.
+At each 1×1 m grid point, the tool reads two elevations: the ground level (DTM) and the surface level including buildings/trees (DSM). The difference gives the above-ground height at that point. Negative differences (e.g. from data noise) are clamped to zero. Volume is the sum of all those heights (each representing 1 m²).
 
 | Column | Format | Required | Source | Description |
 |--------|--------|:--------:|--------|-------------|
-| `volume_above_ground_m3` | float | yes | DTM + DSM | Above-ground volume: `Σ max(surface_i − terrain_i, 0) × 1m²` |
-| `elevation_base_m` | float | yes | DTM | Lowest terrain point under footprint (m asl) — reference datum |
-| `elevation_roof_base_m` | float | yes | DSM | Lowest surface point in footprint — estimated eave (m asl) |
-| `height_mean_m` | float | yes | DTM + DSM | Mean above-ground building height (m) |
-| `height_max_m` | float | yes | DTM + DSM | Max above-ground building height — ridge (m) |
-| `height_minimal_m` | float | yes | Computed | `volume / footprint_area` — equivalent uniform box height (m) |
-| `grid_points_count` | integer | yes | Computed | Number of valid elevation sample points |
+| `volume_above_ground_m3` | float | yes | DTM + DSM | Total above-ground volume: sum of per-cell `max(surface − terrain, 0) × 1 m²` |
+| `elevation_base_m` | float | yes | DTM | Lowest ground elevation under the building (meters above sea level) |
+| `elevation_roof_base_m` | float | yes | DSM | Lowest surface elevation within footprint — typically the roof's lower edge / eave (meters above sea level) |
+| `height_mean_m` | float | yes | DTM + DSM | Average above-ground height across all grid points (m) |
+| `height_max_m` | float | yes | DTM + DSM | Tallest above-ground point — usually the roof ridge (m) |
+| `height_minimal_m` | float | yes | Computed | `volume ÷ footprint area` — the height a simple box with the same footprint would need to match the building's volume (m) |
+| `grid_points_count` | integer | yes | Computed | Number of grid points where both DTM and DSM data were available |
 | `status_step3` | string | yes | Computed | `success` / `skipped` / `no_grid_points` / `no_height_data` / `error` |
 
 ### Step 4 — Floor Areas _(optional, `--estimate-area`)_
 
-Estimates gross floor area from GWR building classification and `height_minimal_m`. Based on the [Canton Zurich methodology](https://are.zh.ch/) (Seiler & Seiler, 2020). Floor height lookup priority: GKLAS → GKAT → default 2.70–3.30 m.
+Estimates gross floor area by dividing building height by a typical floor height for that building type. The building type comes from the GWR (Federal Register of Buildings), which classifies every Swiss building. The tool looks up the floor height in this order: first by the specific building class (GKLAS, e.g. "Office building" → 3.80 m), then by the broader category (GKAT, e.g. "Non-residential" → 4.15 m), and falls back to a default of 3.00 m if no classification is available. Based on the [Canton Zurich methodology](https://are.zh.ch/) (Seiler & Seiler, 2020).
 
 | Column | Format | Required | Source | Description |
 |--------|--------|:--------:|--------|-------------|
-| `gkat` | integer | no, from GWR | GWR | Building category code |
-| `gklas` | integer | no, from GWR | GWR | Building class code |
+| `gkat` | integer | no, from GWR | GWR | Building category code (broad, e.g. 1020 = Residential) |
+| `gklas` | integer | no, from GWR | GWR | Building class code (specific, e.g. 1110 = Single-family house) |
 | `gbauj` | integer | no, from GWR | GWR | Construction year |
-| `gastw` | integer | no, from GWR | GWR | Number of stories |
-| `floor_height_used_m` | float | yes | Lookup | Floor height applied (m) |
-| `floors_estimated` | float | yes | Computed | Estimated floor count |
-| `area_floor_total_m2` | float | yes | Computed | Gross floor area — `footprint × floors` (m²) |
-| `area_accuracy` | string | yes | Computed | `high` (±10–15%) / `medium` (±15–25%) / `low` (±25–40%) |
-| `building_type` | string | yes | Lookup | Building type description from floor height lookup (e.g. `Single-family house`) |
+| `gastw` | integer | no, from GWR | GWR | Number of stories (from register, not estimated) |
+| `floor_height_used_m` | float | yes | Lookup | Floor height used for estimation — average of the min/max range for this building type (m) |
+| `floors_estimated` | integer | yes | Computed | Estimated number of floors: `height_minimal ÷ floor_height`, rounded |
+| `area_floor_total_m2` | float | yes | Computed | Gross floor area: `footprint area × estimated floors` (m²) |
+| `area_accuracy` | string | yes | Computed | `high` (±10–15%) / `medium` (±15–25%) / `low` (±25–40%) — based on how well-defined the floor height is for this building type |
+| `building_type` | string | yes | Lookup | Human-readable building type from floor height lookup (e.g. `Single-family house`) |
 | `status_step4` | string | yes | Computed | `success` / `skipped` / `no_volume` / `height_exceeds_200m` |
 
 ---
@@ -272,14 +272,14 @@ Estimates gross floor area from GWR building classification and `height_minimal_
 
 | Limitation | Detail |
 |------------|--------|
-| No underground estimation | LIDAR captures above-ground only; basements not included |
-| Surface class merging | swissSURFACE3D merges ground, vegetation, buildings; trees over small buildings may cause overestimation |
-| Small buildings | Footprints < 1 m² produce no grid points |
-| Mixed-use buildings | Single floor height applied; actual heights may vary by floor |
-| Industrial / special | Wide floor height ranges (4–7 m) reduce accuracy |
-| Data currency | Elevation model year may not match building construction date |
-| Roof base estimation | `elevation_roof_base_m` may capture ground features (overhangs, passages) instead of true eave |
-| Tree canopy over roofs | LIDAR surface model does not differentiate between roofs and foliage — tall trees covering small buildings produce false positive heights and inflated volumes |
+| No underground estimation | LIDAR only sees above ground — basements and underground floors are not included |
+| Trees over buildings | The surface model doesn't distinguish roofs from foliage — tall trees over small buildings inflate the measured height and volume |
+| Surface model merging | swissSURFACE3D combines ground, vegetation, and buildings into one surface; this can cause overestimation near vegetation |
+| Small buildings | Footprints smaller than 1 m² produce no grid points and can't be measured |
+| Mixed-use buildings | A single floor height is applied per building; actual floor heights may vary (e.g. retail ground floor + residential upper floors) |
+| Industrial / special buildings | Floor height ranges are wide (4–7 m), so floor count estimates are less reliable |
+| Data timing | The elevation model may have been captured before or after the building was constructed or modified |
+| Roof base estimation | `elevation_roof_base_m` picks the lowest surface point, which may hit ground-level features (overhangs, passages) rather than the actual roof edge |
 
 ---
 

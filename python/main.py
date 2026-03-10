@@ -258,7 +258,7 @@ def main():
 
     # ── Output CSV ────────────────────────────────────────────────────────
     # Reorder columns: identifiers first
-    id_cols = ["input_id", "input_egid", "input_lon", "input_lat", "av_egid", "fid"]
+    id_cols = ["input_id", "input_egid", "input_lon", "input_lat", "av_egid", "egid", "fid"]
     existing_id_cols = [c for c in id_cols if c in results_df.columns]
     other_cols = [c for c in results_df.columns if c not in id_cols]
     results_df = results_df[existing_id_cols + other_cols]
