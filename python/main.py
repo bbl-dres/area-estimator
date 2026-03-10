@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from footprints import load_footprints_from_file, load_coordinates_from_csv
+from footprints import load_footprints_from_file, load_footprints_from_av_with_csv_filter
 from volume import TileIndex, calculate_building_volume
 from tile_fetcher import ensure_tiles, tile_ids_from_bounds
 from gwr import enrich_with_gwr
@@ -62,13 +62,17 @@ def main():
                     'estimates building volumes and floor areas from elevation models'
     )
 
-    # Input: building footprints
-    input_group = parser.add_mutually_exclusive_group(required=True)
-    input_group.add_argument('--footprints',
-                             help='Geodata file with building footprints '
-                                  '(GeoPackage, Shapefile, or GeoJSON from Amtliche Vermessung)')
-    input_group.add_argument('--coordinates',
-                             help='CSV file with WGS84 coordinates (columns: lon, lat)')
+    # Input: building footprints — two modes:
+    #   --footprints only             → all buildings in file
+    #   --footprints + --coordinates  → spatial join: one AV polygon per CSV point
+    parser.add_argument('--footprints', required=True,
+                        help='Geodata file with building footprints '
+                             '(GeoPackage, Shapefile, or GeoJSON from Amtliche Vermessung).')
+    parser.add_argument('--coordinates',
+                        help='CSV file with WGS84 coordinates (columns: id, lon, lat; '
+                             'optional: egid for reference). When provided, filters the AV file '
+                             'to only buildings containing a CSV point (strict spatial join, '
+                             'no fallbacks).')
 
     # Input: elevation tiles
     parser.add_argument('--alti3d', required=True,
@@ -135,12 +139,16 @@ def main():
     log.info("=" * 50)
 
     try:
-        if args.footprints:
+        if args.coordinates:
+            log.info("Mode: spatial join — AV footprints filtered to CSV points")
+            buildings = load_footprints_from_av_with_csv_filter(
+                args.footprints, args.coordinates, limit=args.limit,
+            )
+        else:
+            log.info("Mode: all buildings from AV file")
             buildings = load_footprints_from_file(
                 args.footprints, bbox=args.bbox, limit=args.limit,
             )
-        else:
-            buildings = load_coordinates_from_csv(args.coordinates, limit=args.limit)
     except Exception as e:
         log.error(f"Error loading input: {e}")
         return 1

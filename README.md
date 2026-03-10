@@ -24,16 +24,18 @@ Estimates building volumes and gross floor areas using publicly available Swiss 
 ```mermaid
 flowchart TD
     subgraph INPUT
-        A1[Building input<br><i>CSV coordinates or geodata footprints</i>]
+        A1A[AV footprints<br><i>GeoPackage / Shapefile / GeoJSON</i>]
+        A1B[CSV coordinates<br><i>id, lon, lat — optional</i>]
         A2[swissALTI3D tiles<br><i>terrain DTM, 0.5m</i>]
         A3[swissSURFACE3D tiles<br><i>surface DSM, 0.5m</i>]
     end
 
-    A1 --> S1
+    A1A --> S1
+    A1B -.->|optional| S1
     A2 --> S3
     A3 --> S3
 
-    S1["<b>Step 1 — Read Footprints</b><br>CSV: buffer points to 10×10 m<br>Geodata: load building polygons<br>Reprojected to LV95"]
+    S1["<b>Step 1 — Read Footprints</b><br>AV only: all building polygons<br>AV + CSV: spatial join → AV polygon per point<br>Reprojected to LV95"]
     S2["<b>Step 2 — Aligned 1×1m Grid</b><br>Minimum rotated rectangle orientation<br>Grid points filtered to footprint"]
     S3["<b>Step 3 — Volume & Heights</b><br>Sample DTM + DSM at each point<br>Volume = Σ max(surface_i − terrain_i, 0) × 1m²"]
     S4["<b>Step 4 — Floor Areas</b> <i>(optional)</i><br>GWR classification → floor height<br>Floors = height_minimal / floor_height<br>GFA = footprint × floors"]
@@ -59,9 +61,9 @@ flowchart TD
 
 | Argument | Required | Description |
 |----------|:--------:|-------------|
-| **Input** (mutually exclusive) | | |
-| `--coordinates FILE` | one of | CSV with `id`, `lon`, `lat` columns (WGS84); optionally `egid` |
-| `--footprints FILE` | one of | Geodata file with building polygons (GeoPackage, Shapefile, or GeoJSON from AV) |
+| **Input** | | |
+| `--footprints FILE` | yes | Geodata file with building polygons (GeoPackage, Shapefile, or GeoJSON from AV). Alone: processes all buildings in the file. |
+| `--coordinates FILE` | no | CSV with `id`, `lon`, `lat` columns (WGS84); optionally `egid` (reference only). When provided, performs a strict spatial join — only AV buildings containing a CSV point are processed. Points with no matching polygon are reported as `no_footprint` and skipped. No fallbacks. |
 | **Elevation data** | | |
 | `--alti3d DIR` | yes | Directory with swissALTI3D GeoTIFF tiles |
 | `--surface3d DIR` | yes | Directory with swissSURFACE3D GeoTIFF tiles |
@@ -85,53 +87,21 @@ flowchart TD
 pip install -r python/requirements.txt
 ```
 
-### Example 1 — Estimate volumes for a list of buildings (CSV)
+### Example 1 — Portfolio list against AV footprints (spatial join)
 
-You have a CSV with building coordinates (e.g. exported from a portfolio system).
-The tool buffers each point into a 10×10 m footprint, divides it into a 1×1 m grid,
-and samples terrain (DTM) and surface (DSM) elevations at each cell to calculate
-above-ground volume and height metrics:
-
-```csv
-id,lon,lat,egid
-1,8.5391,47.3769,1234567
-2,8.5010,47.3925,
-3,7.4474,46.9480,9876543
-```
-
-The `egid` column is optional — when provided, it enables GWR enrichment in Step 4.
+You have a CSV of buildings (e.g. exported from a portfolio system) and a local copy
+of the Amtliche Vermessung GeoPackage. The tool does a strict spatial join: each CSV
+point must fall within an AV building polygon. Points with no match are skipped —
+fix the coordinates in the source data, not in the code.
 
 ```bash
 python python/main.py \
+    --footprints "D:\AV_lv95\av_2056.gpkg" \
     --coordinates my_buildings.csv \
-    --alti3d data/swissalti3d \
-    --surface3d data/swisssurface3d \
+    --alti3d "D:\SwissAlti3D" \
+    --surface3d "D:\swissSURFACE3D Raster" \
     --auto-fetch \
     -o portfolio_volumes.csv
-```
-
-Add `--estimate-area` with a GWR CSV to also get floor area estimates:
-
-```bash
-python python/main.py \
-    --coordinates my_buildings.csv \
-    --alti3d data/swissalti3d \
-    --surface3d data/swisssurface3d \
-    --auto-fetch \
-    --estimate-area --gwr-csv data/gwr/buildings.csv \
-    -o portfolio_full.csv
-```
-
-For small datasets (< 100 buildings) without a GWR CSV, the tool can query the
-swisstopo REST API per building instead:
-
-```bash
-python python/main.py \
-    --coordinates my_buildings.csv \
-    --alti3d data/swissalti3d \
-    --surface3d data/swisssurface3d \
-    --auto-fetch \
-    --estimate-area
 ```
 
 ### Example 2 — Process all buildings in Switzerland (AV footprints)
@@ -177,6 +147,7 @@ No local elevation data needed — the tool downloads tiles on-the-fly from swis
 
 ```bash
 python python/main.py \
+    --footprints data/av/ch_av_2056.gpkg \
     --coordinates my_buildings.csv \
     --alti3d data/swissalti3d \
     --surface3d data/swisssurface3d \
@@ -192,23 +163,22 @@ python python/main.py \
 
 | Data | Format | Required | Download | Description |
 |------|--------|:--------:|----------|-------------|
-| Building input | `.csv` or geodata | yes | — | CSV with coordinates (`--coordinates`) or GeoPackage/Shapefile (`--footprints`) |
+| AV footprints | GeoPackage / Shapefile / GeoJSON | yes | [geodienste.ch/services/av](https://www.geodienste.ch/services/av) | Building polygons from Amtliche Vermessung (`--footprints`) |
+| Building coordinates | `.csv` | no | — | List of points for spatial join against AV (`--coordinates`); omit to process all buildings in the AV file |
 | swissALTI3D | GeoTIFF tiles (0.5 m) | yes | [swisstopo.admin.ch](https://www.swisstopo.admin.ch/de/hoehenmodell-swissalti3d) | Terrain elevation model (DTM). Can be auto-downloaded with `--auto-fetch`. |
 | swissSURFACE3D Raster | GeoTIFF tiles (0.5 m) | yes | [swisstopo.admin.ch](https://www.swisstopo.admin.ch/de/hoehenmodell-swisssurface3d-raster) | Surface elevation model (DSM). Can be auto-downloaded with `--auto-fetch`. |
 | GWR (Federal Register of Buildings) | `.csv` | with `--estimate-area` | [housing-stat.ch/data](https://www.housing-stat.ch/de/data/supply/public.html) | Building classification for floor height lookup. Falls back to swisstopo API per EGID if omitted. |
 
-### Input Columns (CSV mode)
-
-Expected columns in the user-provided buildings CSV (`--coordinates`).
+### Input Columns (coordinates CSV, `--coordinates`)
 
 | Column | Required | Description |
 |--------|----------|-------------|
-| `id` | yes | Building ID — preserved as `id` in output |
+| `id` | yes | Building reference ID — preserved as `input_id` in output |
 | `lon` | yes | WGS84 longitude |
 | `lat` | yes | WGS84 latitude |
-| `egid` | no | Federal building ID — preserved as `egid` in output; used directly for GWR enrichment in Step 4 |
+| `egid` | no | Federal building ID — preserved as `input_egid` for reference only; not used for matching |
 
-When using `--footprints`, the tool reads building polygons directly from the geodata file. The `egid` column (if present) is mapped to `av_egid`. Building type filtering (`Gebaeude`) is applied automatically.
+Points that do not fall within any AV building polygon result in `status_step1 = no_footprint` and are skipped. Coordinate accuracy must be sufficient for the point to lie inside the polygon — no tolerance or fallback is applied.
 
 ---
 
@@ -218,13 +188,15 @@ All results are written to a single CSV file (`result_<timestamp>.csv`).
 
 ### Step 1 — Footprints
 
-- **CSV mode** (`--coordinates`): Each lat/lon point is converted to Swiss coordinates (LV95) and turned into a 10×10 m square, giving the tool an area to sample heights from. Your `id` and `egid` columns carry through to the output as-is. The `egid` (if provided) is used for GWR lookup in Step 4.
-- **Geodata mode** (`--footprints`): Loads building polygons directly and filters to buildings (looks for `Gebaeude` / `building` in the type column). Converts to Swiss coordinates (LV95) if needed. The `egid` column (if present) is renamed to `av_egid`; each feature gets a `fid` from its source ID.
+Two modes, automatically selected based on which flags are provided:
+
+- **AV only** (`--footprints`): Loads all building polygons from the geodata file and filters to buildings (looks for `Gebaeude` / `building` in the type column). Converts to LV95 if needed. The `egid` column is renamed to `av_egid`; each feature gets a `fid`.
+- **AV + CSV** (`--footprints` + `--coordinates`): Strict spatial join — each CSV point must fall within an AV building polygon. No fallbacks. Rows with no match get `status_step1 = no_footprint` and are skipped; fix the coordinates in the source data.
 
 | Column | Format | Required | Source | Description |
 |--------|--------|:--------:|--------|-------------|
 | `area_footprint_m2` | float | yes | Computed | Footprint area from polygon geometry (m²) |
-| `status_step1` | string | yes | Computed | `ok` |
+| `status_step1` | string | yes | Computed | `ok` / `no_footprint` |
 
 ### Step 2 — Grid
 
