@@ -268,6 +268,7 @@ Estimates gross floor area by dividing building height by a typical floor height
 | Data timing | The elevation model may have been captured before or after the building was constructed or modified |
 | Roof eave estimation | `elevation_roof_min_m` picks the lowest surface point, which may hit ground-level features (overhangs, passages) rather than the actual roof edge |
 | Sloped terrain | Volume is measured from `elevation_base_min_m` (the lowest terrain point) as a flat datum. On steeply sloped sites, this includes terrain undulation between the low and high sides of the building. |
+| Duplicate footprints (CSV mode) | If multiple CSV coordinates fall within the same AV building polygon, each match produces a separate output row with the same volume. The total volume cannot be derived by simply summing the output — deduplicate by `av_egid` or `fid` first if you need building-level aggregation. |
 
 ---
 
