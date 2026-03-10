@@ -23,36 +23,46 @@ Estimates building volumes and gross floor areas using publicly available Swiss 
 
 ```mermaid
 flowchart TD
-    subgraph INPUT
-        A1A[AV footprints<br><i>GeoPackage / Shapefile / GeoJSON</i>]
-        A1B[CSV coordinates<br><i>id, lon, lat — optional</i>]
-        A2[swissALTI3D tiles<br><i>terrain DTM, 0.5m</i>]
-        A3[swissSURFACE3D tiles<br><i>surface DSM, 0.5m</i>]
+    subgraph INPUT["Inputs"]
+        A1A["🔴 --footprints<br>AV GeoPackage / Shapefile / GeoJSON<br><i>required</i>"]
+        A1B["⚪ --coordinates<br>CSV: id, lon, lat<br><i>optional — enables spatial join mode</i>"]
+        A2["🔴 --alti3d<br>swissALTI3D tiles — terrain DTM 0.5m<br><i>required</i>"]
+        A3["🔴 --surface3d<br>swissSURFACE3D tiles — surface DSM 0.5m<br><i>required</i>"]
     end
 
     A1A --> S1
-    A1B -.->|optional| S1
+    A1B -.->|"--coordinates"| S1
     A2 --> S3
     A3 --> S3
 
-    S1["<b>Step 1 — Read Footprints</b><br>AV only: all building polygons<br>AV + CSV: spatial join → AV polygon per point<br>Reprojected to LV95"]
+    S1["<b>Step 1 — Read Footprints</b><br>Mode A: all AV buildings<br>Mode B: spatial join → one AV polygon per CSV point<br>Unmatched points → status: no_footprint"]
     S2["<b>Step 2 — Aligned 1×1m Grid</b><br>Minimum rotated rectangle orientation<br>Grid points filtered to footprint"]
     S3["<b>Step 3 — Volume & Heights</b><br>Sample DTM + DSM at each point<br>Volume = Σ max(surface_i − min(terrain), 0) × 1m²"]
-    S4["<b>Step 4 — Floor Areas</b> <i>(optional)</i><br>GWR classification → floor height<br>Floors = height_minimal / floor_height<br>GFA = footprint × floors"]
+    S4["<b>Step 4 — Floor Areas</b><br>GWR classification → floor height<br>Floors = height_minimal / floor_height<br>GFA = footprint × floors"]
 
-    S1 --> S2 --> S3 --> S4
-
+    S1 --> S2 --> S3
     S3 --> OUT
-    S4 -.->|--estimate-area| OUT
+    S3 -.->|"--estimate-area"| S4
+    S4 -.-> OUT
 
-    OUT[/"<b>Output CSV</b><br>volume, heights, elevations<br>+ floor areas if enabled"/]
+    OUT[/"<b>Output CSV</b><br>volume · heights · elevations<br>+ floor areas if --estimate-area"/]
 
-    subgraph GWR["GWR Data <i>(optional)</i>"]
-        G1[CSV bulk download<br><i>housing-stat.ch</i>]
-        G2[swisstopo API<br><i>per EGID</i>]
+    subgraph GWR["⚪ GWR Data — optional, only with --estimate-area"]
+        G1["--gwr-csv<br>CSV bulk download<br><i>housing-stat.ch</i>"]
+        G2["(default)<br>swisstopo API<br><i>per EGID, live lookup</i>"]
     end
 
     GWR -.-> S4
+
+    classDef required fill:#fde8e8,stroke:#e02424,stroke-width:2px
+    classDef optional fill:#f3f4f6,stroke:#9ca3af,stroke-width:1px
+    classDef step fill:#eff6ff,stroke:#3b82f6,stroke-width:1.5px
+    classDef optionalStep fill:#f3f4f6,stroke:#9ca3af,stroke-width:1px,stroke-dasharray:4 3
+
+    class A1A,A2,A3 required
+    class A1B optional
+    class S1,S2,S3 step
+    class S4 optionalStep
 ```
 
 ---
