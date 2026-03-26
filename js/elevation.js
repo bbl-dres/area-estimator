@@ -97,34 +97,26 @@ export async function preloadTiles(pointsLV95, onProgress) {
     tileIds.add(tileIdFromLV95(pt[0], pt[1]));
   }
 
-  let loaded = 0;
-  const promises = [];
+  // Collect tile load tasks as deferred functions (not started yet)
+  const tasks = [];
   tileIds.forEach((tileId) => {
     const dtmKey = "dtm:" + tileId;
     const dsmKey = "dsm:" + tileId;
     if (!tileDataCache.has(dtmKey) && !failedTiles.has(dtmKey)) {
-      promises.push(
-        getTileData(ALTI3D_URL, tileId).then(() => {
-          loaded++;
-          if (onProgress) onProgress(loaded, promises.length);
-        })
-      );
+      tasks.push(() => getTileData(ALTI3D_URL, tileId));
     }
     if (!tileDataCache.has(dsmKey) && !failedTiles.has(dsmKey)) {
-      promises.push(
-        getTileData(SURFACE3D_URL, tileId).then(() => {
-          loaded++;
-          if (onProgress) onProgress(loaded, promises.length);
-        })
-      );
+      tasks.push(() => getTileData(SURFACE3D_URL, tileId));
     }
   });
 
-  if (promises.length > 0) {
-    // Load up to 4 tiles in parallel
-    for (let j = 0; j < promises.length; j += 4) {
-      await Promise.all(promises.slice(j, j + 4));
-    }
+  // Execute in batches of 4 — each batch starts only after the previous finishes
+  let loaded = 0;
+  for (let j = 0; j < tasks.length; j += 4) {
+    await Promise.all(tasks.slice(j, j + 4).map((fn) => fn().then(() => {
+      loaded++;
+      if (onProgress) onProgress(loaded, tasks.length);
+    })));
   }
 }
 
@@ -221,15 +213,15 @@ function getBuildingAngle(coordsLV95) {
  * 4. Filter points inside the polygon
  * 5. Rotate points back to original orientation
  */
-export function createGridPoints(coordsLV95, spacing = GRID_SPACING) {
+export function createGridPoints(coordsLV95, spacing = GRID_SPACING, angle = null) {
   // Compute centroid
   let cx = 0, cy = 0;
   for (const pt of coordsLV95) { cx += pt[0]; cy += pt[1]; }
   cx /= coordsLV95.length;
   cy /= coordsLV95.length;
 
-  // Get building orientation angle
-  const angle = getBuildingAngle(coordsLV95);
+  // Use provided angle or compute it
+  if (angle === null) angle = getBuildingAngle(coordsLV95);
   const cosA = Math.cos(-angle), sinA = Math.sin(-angle);
 
   // Rotate polygon to align with axes (around centroid)
@@ -276,8 +268,11 @@ export function createGridPoints(coordsLV95, spacing = GRID_SPACING) {
  * Polygon area via Shoelace formula on LV95 coords (returns m2).
  */
 export function polygonAreaLV95(ring) {
+  // Strip closing duplicate if ring is already closed (GeoJSON convention)
+  const n = ring.length;
+  const len = (n > 2 && ring[0][0] === ring[n - 1][0] && ring[0][1] === ring[n - 1][1]) ? n - 1 : n;
   let area = 0;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+  for (let i = 0, j = len - 1; i < len; j = i++) {
     area += ring[j][0] * ring[i][1];
     area -= ring[i][0] * ring[j][1];
   }
@@ -297,7 +292,7 @@ export function polygonAreaLV95(ring) {
  */
 export function computeVolumeSync(coordsLV95) {
   const gridAngle = getBuildingAngle(coordsLV95);
-  const gridPoints = createGridPoints(coordsLV95);
+  const gridPoints = createGridPoints(coordsLV95, GRID_SPACING, gridAngle);
   if (gridPoints.length === 0) return null;
 
   const heights = [];
@@ -382,5 +377,8 @@ export function computeVolumeSync(coordsLV95) {
 }
 
 export function clearElevationCache() {
+  tileDataCache.clear();
   failedTiles.clear();
+  yearHints.dtm = {};
+  yearHints.dsm = {};
 }

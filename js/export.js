@@ -3,6 +3,11 @@
  */
 import { loadScript } from "./config.js";
 
+function timestamp() {
+  const d = new Date();
+  return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}_${String(d.getHours()).padStart(2, "0")}${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
 const CSV_COLUMNS = [
   "input_id", "input_egid", "input_lon", "input_lat",
   "av_egid", "area_official_m2",
@@ -28,7 +33,7 @@ export function downloadCSV(buildings) {
     }).join(";")
   );
   const csv = [header, ...rows].join("\n");
-  downloadBlob(csv, "gebaeudevolumen.csv", "text/csv;charset=utf-8");
+  downloadBlob(csv, `gebaeudevolumen_${timestamp()}.csv`, "text/csv;charset=utf-8");
 }
 
 export async function downloadXLSX(buildings) {
@@ -43,7 +48,7 @@ export async function downloadXLSX(buildings) {
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.json_to_sheet(data, { header: CSV_COLUMNS });
   XLSX.utils.book_append_sheet(wb, ws, "Gebaeude");
-  XLSX.writeFile(wb, "gebaeudevolumen.xlsx");
+  XLSX.writeFile(wb, `gebaeudevolumen_${timestamp()}.xlsx`);
 }
 
 export function downloadGeoJSON(buildings) {
@@ -55,7 +60,7 @@ export function downloadGeoJSON(buildings) {
       return { type: "Feature", geometry: b.geometry, properties: props };
     });
   const geojson = { type: "FeatureCollection", features };
-  downloadBlob(JSON.stringify(geojson, null, 2), "gebaeudevolumen.geojson", "application/geo+json");
+  downloadBlob(JSON.stringify(geojson, null, 2), `gebaeudevolumen_${timestamp()}.geojson`, "application/geo+json");
 }
 
 function downloadBlob(content, filename, type) {

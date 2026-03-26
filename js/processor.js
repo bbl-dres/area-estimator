@@ -77,12 +77,21 @@ export async function processRows(rows, onProgress) {
         return result;
       }
 
-      result.geometry = footprint.geometry;
       result.av_egid = footprint.egid || null;
       result.area_official_m2 = footprint.area || null;
 
+      // Validate geometry
+      const geom = footprint.geometry;
+      if (!geom || geom.type !== "Polygon" || !geom.coordinates || !geom.coordinates[0]) {
+        result.status = STATUS.NO_FOOTPRINT;
+        failed++;
+        noFootprint++;
+        return result;
+      }
+      result.geometry = geom;
+
       // Convert to LV95 for volume computation
-      const coords = footprint.geometry.coordinates[0];
+      const coords = geom.coordinates[0];
       const lv95Coords = coords.map((c) => toLV95(c[0], c[1]));
 
       // Pre-load tiles for this building's extent
@@ -126,7 +135,10 @@ export async function processRows(rows, onProgress) {
         result.building_type = fh.description;
 
         if (result.height_minimal > 0 && result.area_footprint_m2 > 0) {
-          const floorsEstimate = Math.max(1, result.height_minimal / fh.floorHeight);
+          let floorsEstimate = Math.max(1, result.height_minimal / fh.floorHeight);
+          // Cap at GWR floor count if available, otherwise sanity-limit to 200
+          const maxFloors = result.gastw > 0 ? result.gastw : 200;
+          floorsEstimate = Math.min(floorsEstimate, maxFloors);
           result.floors_estimated = Math.round(floorsEstimate);
           result.area_floor_total_m2 = Math.round(result.area_footprint_m2 * floorsEstimate * 100) / 100;
           result.area_accuracy = determineAccuracy(result.gkat, result.gklas, true);
@@ -226,9 +238,10 @@ async function fetchFootprintByCoords(lon, lat, egid) {
       return null;
     }
 
-    // Find building features (Art = "Gebaeude" or "Gebäude")
+    // Find above-ground building features (exclude underground buildings)
     const buildings = data.features.filter((f) => {
       const art = (f.properties.art || f.properties.Art || "").toLowerCase();
+      if (art.includes("unterirdisch")) return false;
       return art.includes("gebaeude") || art.includes("gebäude");
     });
 
@@ -341,7 +354,7 @@ async function fetchGWR(egid) {
     gwrCache.set(key, result);
     return result;
   } catch (err) {
-    gwrCache.set(key, null);
+    // Don't cache network errors — allow retry on transient failures
     return null;
   }
 }

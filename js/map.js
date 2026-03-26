@@ -5,6 +5,37 @@
 import { MAP_STYLES, MAP_DEFAULT, GRID_SPACING, esc, fmtNum } from "./config.js";
 import { fromLV95 } from "./elevation.js";
 
+// Shared layer style definitions (used in plotResults and basemap switcher)
+const BUILDINGS_3D_PAINT = {
+  "fill-extrusion-color": [
+    "case", ["==", ["get", "status"], "success"],
+    ["interpolate", ["linear"], ["coalesce", ["get", "height"], 0],
+      0, "#3498db", 10, "#2ecc71", 20, "#f39c12", 40, "#e74c3c"],
+    "#95a5a6",
+  ],
+  "fill-extrusion-height": ["coalesce", ["get", "height_max"], 3],
+  "fill-extrusion-base": 0,
+  "fill-extrusion-opacity": 0.8,
+};
+const OUTLINE_PAINT = {
+  "line-color": ["case", ["==", ["get", "status"], "success"], "#1a365d", "#ef4444"],
+  "line-width": 1.5,
+};
+const LABELS_LAYOUT = {
+  "text-field": ["get", "id"], "text-size": 11,
+  "text-anchor": "center", "text-allow-overlap": false,
+};
+const LABELS_PAINT = {
+  "text-color": "#1f2937", "text-halo-color": "#fff", "text-halo-width": 1.5,
+};
+const GRID_PAINT = {
+  "fill-extrusion-color": ["interpolate", ["linear"], ["get", "h"],
+    0, "#3498db", 10, "#2ecc71", 20, "#f39c12", 40, "#e74c3c"],
+  "fill-extrusion-height": ["get", "h"],
+  "fill-extrusion-base": 0,
+  "fill-extrusion-opacity": 0.85,
+};
+
 let map = null;
 let buildingsGeoJSON = null;
 let gridCellsGeoJSON = null;
@@ -113,22 +144,7 @@ export function plotResults(data) {
       id: "buildings-3d",
       type: "fill-extrusion",
       source: "buildings",
-      paint: {
-        "fill-extrusion-color": [
-          "case",
-          ["==", ["get", "status"], "success"],
-          ["interpolate", ["linear"], ["coalesce", ["get", "height"], 0],
-            0, "#3498db",
-            10, "#2ecc71",
-            20, "#f39c12",
-            40, "#e74c3c",
-          ],
-          "#95a5a6",
-        ],
-        "fill-extrusion-height": ["coalesce", ["get", "height_max"], 3],
-        "fill-extrusion-base": 0,
-        "fill-extrusion-opacity": 0.8,
-      },
+      paint: BUILDINGS_3D_PAINT,
     });
   }
 
@@ -138,14 +154,7 @@ export function plotResults(data) {
       id: "buildings-outline",
       type: "line",
       source: "buildings",
-      paint: {
-        "line-color": [
-          "case",
-          ["==", ["get", "status"], "success"], "#1a365d",
-          "#ef4444",
-        ],
-        "line-width": 1.5,
-      },
+      paint: OUTLINE_PAINT,
     });
   }
 
@@ -171,17 +180,7 @@ export function plotResults(data) {
       type: "fill-extrusion",
       source: "grid-cells",
       layout: { visibility: "none" },
-      paint: {
-        "fill-extrusion-color": ["interpolate", ["linear"], ["get", "h"],
-          0, "#3498db",
-          10, "#2ecc71",
-          20, "#f39c12",
-          40, "#e74c3c",
-        ],
-        "fill-extrusion-height": ["get", "h"],
-        "fill-extrusion-base": 0,
-        "fill-extrusion-opacity": 0.85,
-      },
+      paint: GRID_PAINT,
     });
   }
 
@@ -191,17 +190,8 @@ export function plotResults(data) {
       id: "buildings-labels",
       type: "symbol",
       source: "buildings",
-      layout: {
-        "text-field": ["get", "id"],
-        "text-size": 11,
-        "text-anchor": "center",
-        "text-allow-overlap": false,
-      },
-      paint: {
-        "text-color": "#1f2937",
-        "text-halo-color": "#fff",
-        "text-halo-width": 1.5,
-      },
+      layout: LABELS_LAYOUT,
+      paint: LABELS_PAINT,
       minzoom: 15,
     });
   }
@@ -335,41 +325,16 @@ function initBasemapSwitcher() {
           const visGrid = document.getElementById("layer-toggle-grid")?.checked ? "visible" : "none";
 
           map.addSource("buildings", { type: "geojson", data: savedData });
-          map.addLayer({
-            id: "buildings-3d", type: "fill-extrusion", source: "buildings",
-            layout: { visibility: visBuildings },
-            paint: {
-              "fill-extrusion-color": ["case", ["==", ["get", "status"], "success"],
-                ["interpolate", ["linear"], ["coalesce", ["get", "height"], 0], 0, "#3498db", 10, "#2ecc71", 20, "#f39c12", 40, "#e74c3c"],
-                "#95a5a6"],
-              "fill-extrusion-height": ["coalesce", ["get", "height_max"], 3],
-              "fill-extrusion-base": 0,
-              "fill-extrusion-opacity": 0.8,
-            },
-          });
-          map.addLayer({
-            id: "buildings-outline", type: "line", source: "buildings",
-            layout: { visibility: visFootprints },
-            paint: { "line-color": ["case", ["==", ["get", "status"], "success"], "#1a365d", "#ef4444"], "line-width": 1.5 },
-          });
-          map.addLayer({
-            id: "buildings-labels", type: "symbol", source: "buildings",
-            layout: { visibility: visLabels, "text-field": ["get", "id"], "text-size": 11, "text-anchor": "center", "text-allow-overlap": false },
-            paint: { "text-color": "#1f2937", "text-halo-color": "#fff", "text-halo-width": 1.5 },
-            minzoom: 15,
-          });
+          map.addLayer({ id: "buildings-3d", type: "fill-extrusion", source: "buildings",
+            layout: { visibility: visBuildings }, paint: BUILDINGS_3D_PAINT });
+          map.addLayer({ id: "buildings-outline", type: "line", source: "buildings",
+            layout: { visibility: visFootprints }, paint: OUTLINE_PAINT });
+          map.addLayer({ id: "buildings-labels", type: "symbol", source: "buildings",
+            layout: { visibility: visLabels, ...LABELS_LAYOUT }, paint: LABELS_PAINT, minzoom: 15 });
           const gridData = gridCellsGeoJSON || { type: "FeatureCollection", features: [] };
           map.addSource("grid-cells", { type: "geojson", data: gridData });
-          map.addLayer({
-            id: "grid-cells-3d", type: "fill-extrusion", source: "grid-cells",
-            layout: { visibility: visGrid },
-            paint: {
-              "fill-extrusion-color": ["interpolate", ["linear"], ["get", "h"], 0, "#3498db", 10, "#2ecc71", 20, "#f39c12", 40, "#e74c3c"],
-              "fill-extrusion-height": ["get", "h"],
-              "fill-extrusion-base": 0,
-              "fill-extrusion-opacity": 0.85,
-            },
-          });
+          map.addLayer({ id: "grid-cells-3d", type: "fill-extrusion", source: "grid-cells",
+            layout: { visibility: visGrid }, paint: GRID_PAINT });
         }
       });
 
@@ -399,7 +364,7 @@ function initAccordion() {
     const collapsed = panel.classList.toggle("collapsed");
     toggle.querySelector(".material-symbols-outlined").textContent = collapsed ? "expand_more" : "expand_less";
     const textEl = document.getElementById("menu-toggle-text");
-    if (textEl) textEl.textContent = collapsed ? "Menu offnen" : "Menu schliessen";
+    if (textEl) textEl.textContent = collapsed ? "Menü öffnen" : "Menü schliessen";
   });
 
   panel.querySelectorAll(".accordion-header").forEach((header) => {

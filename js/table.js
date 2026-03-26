@@ -185,12 +185,13 @@ function initResizeHandle() {
       const delta = startY - ev.clientY;
       panel.style.height = Math.max(100, startH + delta) + "px";
     };
-    const onUp = () => {
+    const onUp = async () => {
       handle.classList.remove("dragging");
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
       // Resize map after table resize
-      const { resizeMap } = import("./map.js");
+      const { resizeMap } = await import("./map.js");
+      resizeMap();
     };
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);

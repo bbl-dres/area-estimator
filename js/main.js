@@ -97,7 +97,7 @@ async function onStartProcessing(parsedData) {
     if (!processedResults || !processedResults.buildings.length) {
       showState("upload");
       const err = document.getElementById("upload-error");
-      if (err) { err.textContent = "Keine Ergebnisse. Prufen Sie die Eingabedatei."; err.hidden = false; }
+      if (err) { err.textContent = "Keine Ergebnisse. Prüfen Sie die Eingabedatei."; err.hidden = false; }
       return;
     }
 
