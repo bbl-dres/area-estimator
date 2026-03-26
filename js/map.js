@@ -36,8 +36,21 @@ const GRID_PAINT = {
   "fill-extrusion-opacity": 0.85,
 };
 
+// Cluster style constants
+const CLUSTER_COLORS = [
+  [100, "#e74c3c"],   // 100+ buildings: red
+  [20,  "#f39c12"],   // 20–99: orange
+  [0,   "#3498db"],   // 0–19: blue
+];
+const CLUSTER_RADII = [
+  [100, 30],
+  [20,  24],
+  [0,   18],
+];
+
 let map = null;
 let buildingsGeoJSON = null;
+let clusterGeoJSON = null;
 let gridCellsGeoJSON = null;
 let rawGridCells = null;
 let callbacks = {};
@@ -105,6 +118,106 @@ export async function initMap(containerId, cbs) {
   document.getElementById("style-switcher")?.classList.add("visible");
 }
 
+/** Build a point FeatureCollection of building centroids for clustering */
+function buildClusterPoints(buildings) {
+  const pts = buildings
+    .filter((b) => b.geometry)
+    .map((b, i) => {
+      const centroid = turf.centroid({ type: "Feature", geometry: b.geometry });
+      return {
+        type: "Feature",
+        geometry: centroid.geometry,
+        properties: {
+          _index: i,
+          id: b.input_id,
+          status: b.status,
+        },
+      };
+    });
+  return { type: "FeatureCollection", features: pts };
+}
+
+/** Add cluster source and layers to the map */
+function addClusterLayers(visible) {
+  if (!clusterGeoJSON) return;
+  const vis = visible ? "visible" : "none";
+
+  if (!map.getSource("buildings-clustered")) {
+    map.addSource("buildings-clustered", {
+      type: "geojson",
+      data: clusterGeoJSON,
+      cluster: true,
+      clusterMaxZoom: 14,
+      clusterRadius: 50,
+    });
+  }
+
+  // Cluster circles
+  if (!map.getLayer("clusters")) {
+    map.addLayer({
+      id: "clusters",
+      type: "circle",
+      source: "buildings-clustered",
+      filter: ["has", "point_count"],
+      layout: { visibility: vis },
+      paint: {
+        "circle-color": [
+          "step", ["get", "point_count"],
+          CLUSTER_COLORS[2][1], CLUSTER_COLORS[1][0],
+          CLUSTER_COLORS[1][1], CLUSTER_COLORS[0][0],
+          CLUSTER_COLORS[0][1],
+        ],
+        "circle-radius": [
+          "step", ["get", "point_count"],
+          CLUSTER_RADII[2][1], CLUSTER_RADII[1][0],
+          CLUSTER_RADII[1][1], CLUSTER_RADII[0][0],
+          CLUSTER_RADII[0][1],
+        ],
+        "circle-stroke-width": 2,
+        "circle-stroke-color": "#fff",
+      },
+    });
+  }
+
+  // Cluster count labels
+  if (!map.getLayer("cluster-count")) {
+    map.addLayer({
+      id: "cluster-count",
+      type: "symbol",
+      source: "buildings-clustered",
+      filter: ["has", "point_count"],
+      layout: {
+        visibility: vis,
+        "text-field": ["get", "point_count_abbreviated"],
+        "text-size": 12,
+        "text-allow-overlap": true,
+      },
+      paint: {
+        "text-color": "#fff",
+      },
+    });
+  }
+
+  // Unclustered individual points
+  if (!map.getLayer("unclustered-point")) {
+    map.addLayer({
+      id: "unclustered-point",
+      type: "circle",
+      source: "buildings-clustered",
+      filter: ["!", ["has", "point_count"]],
+      layout: { visibility: vis },
+      paint: {
+        "circle-color": [
+          "case", ["==", ["get", "status"], "success"], "#3498db", "#95a5a6",
+        ],
+        "circle-radius": 6,
+        "circle-stroke-width": 1.5,
+        "circle-stroke-color": "#fff",
+      },
+    });
+  }
+}
+
 export function plotResults(data) {
   if (!map || !data || !data.buildings) return;
 
@@ -130,6 +243,9 @@ export function plotResults(data) {
     }));
 
   buildingsGeoJSON = { type: "FeatureCollection", features };
+
+  // Build cluster point data
+  clusterGeoJSON = buildClusterPoints(data.buildings);
 
   // Add source
   if (map.getSource("buildings")) {
@@ -157,6 +273,10 @@ export function plotResults(data) {
       paint: OUTLINE_PAINT,
     });
   }
+
+  // Cluster layers
+  const clusterToggle = document.getElementById("layer-toggle-clusters");
+  addClusterLayers(!clusterToggle || clusterToggle.checked);
 
   // Grid cells — store raw LV95 data with angle, convert lazily on first toggle
   rawGridCells = data.buildings
@@ -229,6 +349,27 @@ export function plotResults(data) {
   map.on("mouseenter", "buildings-3d", () => { map.getCanvas().style.cursor = "pointer"; });
   map.on("mouseleave", "buildings-3d", () => { map.getCanvas().style.cursor = ""; });
 
+  // Cluster click → zoom to expand
+  map.on("click", "clusters", (e) => {
+    const cluster = e.features[0];
+    map.getSource("buildings-clustered").getClusterExpansionZoom(cluster.properties.cluster_id, (err, zoom) => {
+      if (err) return;
+      map.easeTo({ center: cluster.geometry.coordinates, zoom: zoom + 0.5 });
+    });
+  });
+  map.on("mouseenter", "clusters", () => { map.getCanvas().style.cursor = "pointer"; });
+  map.on("mouseleave", "clusters", () => { map.getCanvas().style.cursor = ""; });
+
+  // Unclustered point click → fly to building
+  map.on("click", "unclustered-point", (e) => {
+    if (!e.features.length) return;
+    const idx = e.features[0].properties._index;
+    map.flyTo({ center: e.lngLat, zoom: 17 });
+    if (callbacks.onBuildingSelect) callbacks.onBuildingSelect(idx);
+  });
+  map.on("mouseenter", "unclustered-point", () => { map.getCanvas().style.cursor = "pointer"; });
+  map.on("mouseleave", "unclustered-point", () => { map.getCanvas().style.cursor = ""; });
+
   // Layer toggles
   document.getElementById("layer-toggle-footprints")?.addEventListener("change", (e) => {
     if (map.getLayer("buildings-outline")) {
@@ -251,6 +392,12 @@ export function plotResults(data) {
   document.getElementById("layer-toggle-labels")?.addEventListener("change", (e) => {
     if (map.getLayer("buildings-labels")) {
       map.setLayoutProperty("buildings-labels", "visibility", e.target.checked ? "visible" : "none");
+    }
+  });
+  document.getElementById("layer-toggle-clusters")?.addEventListener("change", (e) => {
+    const vis = e.target.checked ? "visible" : "none";
+    for (const id of ["clusters", "cluster-count", "unclustered-point"]) {
+      if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", vis);
     }
   });
 
@@ -323,6 +470,7 @@ function initBasemapSwitcher() {
           const visBuildings = document.getElementById("layer-toggle-buildings")?.checked ? "visible" : "none";
           const visLabels = document.getElementById("layer-toggle-labels")?.checked ? "visible" : "none";
           const visGrid = document.getElementById("layer-toggle-grid")?.checked ? "visible" : "none";
+          const visClusters = document.getElementById("layer-toggle-clusters")?.checked !== false;
 
           map.addSource("buildings", { type: "geojson", data: savedData });
           map.addLayer({ id: "buildings-3d", type: "fill-extrusion", source: "buildings",
@@ -335,6 +483,9 @@ function initBasemapSwitcher() {
           map.addSource("grid-cells", { type: "geojson", data: gridData });
           map.addLayer({ id: "grid-cells-3d", type: "fill-extrusion", source: "grid-cells",
             layout: { visibility: visGrid }, paint: GRID_PAINT });
+
+          // Re-add cluster layers
+          addClusterLayers(visClusters);
         }
       });
 
