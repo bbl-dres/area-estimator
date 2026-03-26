@@ -6,8 +6,8 @@
  * 4. Optionally estimate floor areas via GWR lookup
  */
 
-import { API, CONCURRENCY, STATUS, getFloorHeight, determineAccuracy } from "./config.js";
-import { toLV95, preloadTiles, computeVolumeSync, polygonAreaLV95 } from "./elevation.js";
+import { API, CONCURRENCY, GRID_SPACING, STATUS, getFloorHeight, determineAccuracy } from "./config.js";
+import { toLV95, fromLV95, preloadTiles, computeVolumeSync, polygonAreaLV95 } from "./elevation.js";
 
 let cancelled = false;
 
@@ -97,9 +97,29 @@ export async function processRows(rows, onProgress) {
         return result;
       }
 
-      // Copy volume results
-      Object.assign(result, vol);
+      // Copy volume results (exclude grid_cells from result object)
+      const { grid_cells, ...volResults } = vol;
+      Object.assign(result, volResults);
       result.status = STATUS.SUCCESS;
+
+      // Convert grid cells to WGS84 square polygons for map visualization
+      if (grid_cells && grid_cells.length > 0) {
+        const half = GRID_SPACING / 2;
+        result.grid_features = grid_cells.map((c) => {
+          const sw = fromLV95(c.x - half, c.y - half);
+          const se = fromLV95(c.x + half, c.y - half);
+          const ne = fromLV95(c.x + half, c.y + half);
+          const nw = fromLV95(c.x - half, c.y + half);
+          return {
+            type: "Feature",
+            geometry: {
+              type: "Polygon",
+              coordinates: [[sw, se, ne, nw, sw]],
+            },
+            properties: { h: Math.round(c.h * 10) / 10 },
+          };
+        });
+      }
       succeeded++;
 
       // Try GWR lookup for floor area estimation

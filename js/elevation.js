@@ -204,6 +204,7 @@ export function computeVolumeSync(coordsLV95) {
   const heights = [];
   const dtmValues = [];
   const dsmValues = [];
+  const validPoints = [];
 
   for (const pt of gridPoints) {
     const x = pt[0], y = pt[1];
@@ -218,6 +219,7 @@ export function computeVolumeSync(coordsLV95) {
     if (dtm !== null && dsm !== null) {
       dtmValues.push(dtm);
       dsmValues.push(dsm);
+      validPoints.push(pt);
     }
   }
 
@@ -234,10 +236,12 @@ export function computeVolumeSync(coordsLV95) {
 
   // Heights measured from lowest terrain point
   let volume = 0;
+  const cells = [];
   for (let i = 0; i < dtmValues.length; i++) {
     const h = Math.max(dsmValues[i] - minDTM, 0);
     heights.push(h);
     volume += h; // Each grid point represents 1m2 (GRID_SPACING = 1)
+    cells.push({ x: validPoints[i][0], y: validPoints[i][1], h });
   }
 
   // Height statistics
@@ -266,6 +270,8 @@ export function computeVolumeSync(coordsLV95) {
     height_mean: Math.round(heightMean * 10) / 10,
     height_minimal: Math.round(heightMinimal * 10) / 10,
     grid_points: dtmValues.length,
+    grid_cells: cells,
+    grid_spacing: GRID_SPACING,
   };
 }
 

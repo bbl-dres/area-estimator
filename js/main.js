@@ -132,7 +132,7 @@ function updateProgress(progress, startTime) {
 
   progressEls.barFill.style.width = `${pct}%`;
   progressEls.bar.setAttribute("aria-valuenow", Math.round(pct));
-  progressEls.text.textContent = `Gebaude ${processed} / ${total} (${pct}%)`;
+  progressEls.text.textContent = `Gebäude ${processed} / ${total} (${pct}%)`;
 
   const elapsed = Date.now() - startTime;
   const perItem = processed > 0 ? elapsed / processed : 0;
@@ -213,11 +213,11 @@ function updateSummaryPanel() {
   const now = new Date();
 
   document.getElementById("sp-body").innerHTML = `
-    <!-- Ubersicht -->
+    <!-- Übersicht -->
     <div class="sp-collapse-section open" data-sp-section="overview">
       <div class="sp-collapse-header">
         <span class="material-symbols-outlined sp-collapse-arrow">expand_more</span>
-        <span>Gebaude-Zuordnung</span>
+        <span>Gebäude-Zuordnung</span>
       </div>
       <div class="sp-collapse-content">
         <div class="sp-meta-row">
@@ -236,14 +236,14 @@ function updateSummaryPanel() {
     <div class="sp-collapse-section open" data-sp-section="volume">
       <div class="sp-collapse-header">
         <span class="material-symbols-outlined sp-collapse-arrow">expand_more</span>
-        <span>Volumen und Hohen</span>
+        <span>Volumen und Höhen</span>
       </div>
       <div class="sp-collapse-content">
         <div class="sp-kpi-grid">
           <div class="sp-kpi"><div class="sp-kpi-value">${fmtNum(totalVolume, 0)}</div><div class="sp-kpi-label">Volumen (m\u00B3)</div></div>
-          <div class="sp-kpi"><div class="sp-kpi-value">${fmtNum(totalFootprint, 0)}</div><div class="sp-kpi-label">Grundflache (m\u00B2)</div></div>
-          <div class="sp-kpi"><div class="sp-kpi-value">${fmtNum(avgHeight, 1)}</div><div class="sp-kpi-label">Hohe \u00D8 (m)</div></div>
-          <div class="sp-kpi"><div class="sp-kpi-value">${fmtNum(totalFloorArea, 0)}</div><div class="sp-kpi-label">Geschossflache (m\u00B2)</div></div>
+          <div class="sp-kpi"><div class="sp-kpi-value">${fmtNum(totalFootprint, 0)}</div><div class="sp-kpi-label">Grundfläche (m\u00B2)</div></div>
+          <div class="sp-kpi"><div class="sp-kpi-value">${fmtNum(avgHeight, 1)}</div><div class="sp-kpi-label">Höhe \u00D8 (m)</div></div>
+          <div class="sp-kpi"><div class="sp-kpi-value">${fmtNum(totalFloorArea, 0)}</div><div class="sp-kpi-label">Geschossfläche (m\u00B2)</div></div>
         </div>
       </div>
     </div>

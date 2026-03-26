@@ -6,6 +6,7 @@ import { MAP_STYLES, MAP_DEFAULT, esc, fmtNum } from "./config.js";
 
 let map = null;
 let buildingsGeoJSON = null;
+let gridCellsGeoJSON = null;
 let callbacks = {};
 let summaryToggleCb = null;
 
@@ -123,6 +124,39 @@ export function plotResults(data) {
     });
   }
 
+  // Grid cells — collect from all buildings
+  const gridFeatures = data.buildings
+    .filter((b) => b.grid_features)
+    .flatMap((b) => b.grid_features);
+
+  gridCellsGeoJSON = { type: "FeatureCollection", features: gridFeatures };
+
+  if (map.getSource("grid-cells")) {
+    map.getSource("grid-cells").setData(gridCellsGeoJSON);
+  } else {
+    map.addSource("grid-cells", { type: "geojson", data: gridCellsGeoJSON });
+  }
+
+  if (!map.getLayer("grid-cells-3d")) {
+    map.addLayer({
+      id: "grid-cells-3d",
+      type: "fill-extrusion",
+      source: "grid-cells",
+      layout: { visibility: "none" },
+      paint: {
+        "fill-extrusion-color": ["interpolate", ["linear"], ["get", "h"],
+          0, "#3498db",
+          10, "#2ecc71",
+          20, "#f39c12",
+          40, "#e74c3c",
+        ],
+        "fill-extrusion-height": ["get", "h"],
+        "fill-extrusion-base": 0,
+        "fill-extrusion-opacity": 0.85,
+      },
+    });
+  }
+
   // Labels
   if (!map.getLayer("buildings-labels")) {
     map.addLayer({
@@ -152,14 +186,14 @@ export function plotResults(data) {
 
     const html = `
       <div class="map-popup">
-        <div class="popup-layer">GEBAUDE</div>
+        <div class="popup-layer">GEBÄUDE</div>
         <div class="popup-title">${esc(p.id)}</div>
         <div class="popup-sub">EGID: ${esc(p.egid || "\u2013")}</div>
         <table class="popup-table">
           <tr><td>Volumen</td><td>${p.volume != null ? fmtNum(p.volume, 0) + " m\u00B3" : "\u2013"}</td></tr>
-          <tr><td>Hohe (Mittel)</td><td>${p.height != null ? fmtNum(p.height, 1) + " m" : "\u2013"}</td></tr>
-          <tr><td>Hohe (Max)</td><td>${p.height_max != null ? fmtNum(p.height_max, 1) + " m" : "\u2013"}</td></tr>
-          <tr><td>Grundflache</td><td>${p.area_footprint != null ? fmtNum(p.area_footprint, 1) + " m\u00B2" : "\u2013"}</td></tr>
+          <tr><td>Höhe (Mittel)</td><td>${p.height != null ? fmtNum(p.height, 1) + " m" : "\u2013"}</td></tr>
+          <tr><td>Höhe (Max)</td><td>${p.height_max != null ? fmtNum(p.height_max, 1) + " m" : "\u2013"}</td></tr>
+          <tr><td>Grundfläche</td><td>${p.area_footprint != null ? fmtNum(p.area_footprint, 1) + " m\u00B2" : "\u2013"}</td></tr>
           <tr><td>Geschosse</td><td>${p.floors || "\u2013"}</td></tr>
           <tr><td>Geschossflache</td><td>${p.area_floor != null ? fmtNum(p.area_floor, 0) + " m\u00B2" : "\u2013"}</td></tr>
           <tr><td>Typ</td><td>${esc(p.building_type || "\u2013")}</td></tr>
@@ -178,11 +212,20 @@ export function plotResults(data) {
   map.on("mouseleave", "buildings-3d", () => { map.getCanvas().style.cursor = ""; });
 
   // Layer toggles
+  document.getElementById("layer-toggle-footprints")?.addEventListener("change", (e) => {
+    if (map.getLayer("buildings-outline")) {
+      map.setLayoutProperty("buildings-outline", "visibility", e.target.checked ? "visible" : "none");
+    }
+  });
   document.getElementById("layer-toggle-buildings")?.addEventListener("change", (e) => {
-    const vis = e.target.checked ? "visible" : "none";
-    ["buildings-3d", "buildings-outline"].forEach((l) => {
-      if (map.getLayer(l)) map.setLayoutProperty(l, "visibility", vis);
-    });
+    if (map.getLayer("buildings-3d")) {
+      map.setLayoutProperty("buildings-3d", "visibility", e.target.checked ? "visible" : "none");
+    }
+  });
+  document.getElementById("layer-toggle-grid")?.addEventListener("change", (e) => {
+    if (map.getLayer("grid-cells-3d")) {
+      map.setLayoutProperty("grid-cells-3d", "visibility", e.target.checked ? "visible" : "none");
+    }
   });
   document.getElementById("layer-toggle-labels")?.addEventListener("change", (e) => {
     if (map.getLayer("buildings-labels")) {
@@ -250,6 +293,7 @@ function initBasemapSwitcher() {
 
       // Remember current state
       const savedData = buildingsGeoJSON;
+      const savedGrid = gridCellsGeoJSON;
 
       map.setStyle(cfg.url);
       map.once("style.load", () => {
@@ -278,6 +322,19 @@ function initBasemapSwitcher() {
             paint: { "text-color": "#1f2937", "text-halo-color": "#fff", "text-halo-width": 1.5 },
             minzoom: 15,
           });
+          if (savedGrid) {
+            map.addSource("grid-cells", { type: "geojson", data: savedGrid });
+            map.addLayer({
+              id: "grid-cells-3d", type: "fill-extrusion", source: "grid-cells",
+              layout: { visibility: document.getElementById("layer-toggle-grid")?.checked ? "visible" : "none" },
+              paint: {
+                "fill-extrusion-color": ["interpolate", ["linear"], ["get", "h"], 0, "#3498db", 10, "#2ecc71", 20, "#f39c12", 40, "#e74c3c"],
+                "fill-extrusion-height": ["get", "h"],
+                "fill-extrusion-base": 0,
+                "fill-extrusion-opacity": 0.85,
+              },
+            });
+          }
         }
       });
 

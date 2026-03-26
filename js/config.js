@@ -31,37 +31,37 @@ export const YEARS = [2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017];
 export const FLOOR_HEIGHT_LOOKUP = {
   // GKAT-based (category)
   "1010": { gf: [2.70, 3.30], uf: [2.70, 3.30], schema: "GKAT", desc: "Provisorische Unterkunft" },
-  "1030": { gf: [2.70, 3.30], uf: [2.70, 3.30], schema: "GKAT", desc: "Wohngebaude mit Nebennutzung" },
+  "1030": { gf: [2.70, 3.30], uf: [2.70, 3.30], schema: "GKAT", desc: "Wohngebäude mit Nebennutzung" },
   "1040": { gf: [3.30, 3.70], uf: [2.70, 3.70], schema: "GKAT", desc: "Teilweise bewohnt" },
-  "1060": { gf: [3.30, 5.00], uf: [3.00, 5.00], schema: "GKAT", desc: "Nicht-Wohngebaude" },
-  "1080": { gf: [3.00, 4.00], uf: [3.00, 4.00], schema: "GKAT", desc: "Spezialgebaude" },
+  "1060": { gf: [3.30, 5.00], uf: [3.00, 5.00], schema: "GKAT", desc: "Nicht-Wohngebäude" },
+  "1080": { gf: [3.00, 4.00], uf: [3.00, 4.00], schema: "GKAT", desc: "Spezialgebäude" },
 
   // GKLAS-based (class) — Residential
   "1110": { gf: [2.70, 3.30], uf: [2.70, 3.30], schema: "GKLAS", desc: "Einfamilienhaus" },
   "1121": { gf: [2.70, 3.30], uf: [2.70, 3.30], schema: "GKLAS", desc: "Zweifamilienhaus" },
   "1122": { gf: [2.70, 3.30], uf: [2.70, 3.30], schema: "GKLAS", desc: "Mehrfamilienhaus" },
-  "1130": { gf: [2.70, 3.30], uf: [2.70, 3.30], schema: "GKLAS", desc: "Wohngebaude fur Gemeinschaft" },
+  "1130": { gf: [2.70, 3.30], uf: [2.70, 3.30], schema: "GKLAS", desc: "Wohngebäude für Gemeinschaft" },
 
   // Hotels and Tourism
   "1211": { gf: [3.30, 3.70], uf: [3.00, 3.50], schema: "GKLAS", desc: "Hotel" },
   "1212": { gf: [3.00, 3.50], uf: [3.00, 3.50], schema: "GKLAS", desc: "Kurzaufenthalt" },
 
   // Commercial and Industrial
-  "1220": { gf: [3.40, 4.20], uf: [3.40, 4.20], schema: "GKLAS", desc: "Burogebaude" },
+  "1220": { gf: [3.40, 4.20], uf: [3.40, 4.20], schema: "GKLAS", desc: "Bürogebäude" },
   "1230": { gf: [3.40, 5.00], uf: [3.40, 5.00], schema: "GKLAS", desc: "Gross- und Einzelhandel" },
   "1231": { gf: [3.30, 4.00], uf: [3.30, 4.00], schema: "GKLAS", desc: "Restaurant" },
   "1241": { gf: [4.00, 6.00], uf: [4.00, 6.00], schema: "GKLAS", desc: "Bahnhof/Terminal" },
   "1242": { gf: [2.80, 3.20], uf: [2.80, 3.20], schema: "GKLAS", desc: "Parkhaus" },
-  "1251": { gf: [4.00, 7.00], uf: [4.00, 7.00], schema: "GKLAS", desc: "Industriegebaude" },
+  "1251": { gf: [4.00, 7.00], uf: [4.00, 7.00], schema: "GKLAS", desc: "Industriegebäude" },
   "1252": { gf: [3.50, 6.00], uf: [3.50, 6.00], schema: "GKLAS", desc: "Tank/Silo/Lager" },
   "1261": { gf: [3.50, 5.00], uf: [3.50, 5.00], schema: "GKLAS", desc: "Kultur und Freizeit" },
   "1262": { gf: [3.50, 5.00], uf: [3.50, 5.00], schema: "GKLAS", desc: "Museum/Bibliothek" },
   "1263": { gf: [3.30, 4.00], uf: [3.30, 4.00], schema: "GKLAS", desc: "Schule/Universitat" },
   "1264": { gf: [3.30, 4.00], uf: [3.30, 4.00], schema: "GKLAS", desc: "Spital/Klinik" },
   "1265": { gf: [3.00, 6.00], uf: [3.00, 6.00], schema: "GKLAS", desc: "Sporthalle" },
-  "1271": { gf: [3.50, 5.00], uf: [3.50, 5.00], schema: "GKLAS", desc: "Landwirtschaftsgebaude" },
+  "1271": { gf: [3.50, 5.00], uf: [3.50, 5.00], schema: "GKLAS", desc: "Landwirtschaftsgebäude" },
   "1272": { gf: [3.00, 6.00], uf: [3.00, 6.00], schema: "GKLAS", desc: "Kirche" },
-  "1273": { gf: [3.00, 4.00], uf: [3.00, 4.00], schema: "GKLAS", desc: "Denkmalgeschutztes Gebaude" },
+  "1273": { gf: [3.00, 4.00], uf: [3.00, 4.00], schema: "GKLAS", desc: "Denkmalgeschütztes Gebäude" },
   "1274": { gf: [3.00, 4.00], uf: [3.00, 4.00], schema: "GKLAS", desc: "Sonstiges Bauwerk" },
 };
 

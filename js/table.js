@@ -37,12 +37,12 @@ const COLUMNS = [
   { key: "av_egid", label: "EGID", cls: "" },
   { key: "status", label: "Status", cls: "" },
   { key: "volume_m3", label: "Volumen (m\u00B3)", cls: "num" },
-  { key: "area_footprint_m2", label: "Grundflache (m\u00B2)", cls: "num" },
-  { key: "height_mean", label: "Hohe Mittel (m)", cls: "num" },
-  { key: "height_max", label: "Hohe Max (m)", cls: "num" },
-  { key: "height_minimal", label: "Hohe Minimal (m)", cls: "num" },
+  { key: "area_footprint_m2", label: "Grundfläche (m\u00B2)", cls: "num" },
+  { key: "height_mean", label: "Höhe Mittel (m)", cls: "num" },
+  { key: "height_max", label: "Höhe Max (m)", cls: "num" },
+  { key: "height_minimal", label: "Höhe Minimal (m)", cls: "num" },
   { key: "floors_estimated", label: "Geschosse", cls: "num" },
-  { key: "area_floor_total_m2", label: "Geschossflache (m\u00B2)", cls: "num" },
+  { key: "area_floor_total_m2", label: "Geschossfläche (m\u00B2)", cls: "num" },
   { key: "building_type", label: "Typ", cls: "" },
   { key: "area_accuracy", label: "Genauigkeit", cls: "" },
 ];
@@ -69,7 +69,7 @@ function render() {
   const statusLabel = (s) => {
     if (s === STATUS.SUCCESS) return '<span style="color:var(--color-good-text)">OK</span>';
     if (s === STATUS.NO_FOOTPRINT) return '<span style="color:var(--color-poor-text)">Kein Grundriss</span>';
-    if (s === STATUS.NO_HEIGHT_DATA) return '<span style="color:var(--color-warn-text)">Keine Hohe</span>';
+    if (s === STATUS.NO_HEIGHT_DATA) return '<span style="color:var(--color-warn-text)">Keine Höhe</span>';
     if (s && s.startsWith("error:")) return `<span style="color:var(--color-poor-text)">Fehler</span>`;
     return s || "\u2013";
   };
@@ -90,7 +90,7 @@ function render() {
           <input type="text" id="tbl-search" placeholder="Suche in Tabelle...">
         </div>
         <div class="toolbar-actions">
-          <span style="font-size:var(--text-2xs);color:var(--gray-500)">${sorted.length} Gebaude</span>
+          <span style="font-size:var(--text-2xs);color:var(--gray-500)">${sorted.length} Gebäude</span>
         </div>
       </div>
       <div class="list-table-wrapper">

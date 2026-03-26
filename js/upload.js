@@ -61,12 +61,12 @@ async function handleFile(file) {
     } else if (ext === "xlsx" || ext === "xls") {
       parsedData = await parseExcel(file);
     } else {
-      showError("Nicht unterstutztes Dateiformat. Bitte CSV oder Excel verwenden.");
+      showError("Nicht unterstütztes Dateiformat. Bitte CSV oder Excel verwenden.");
       return;
     }
 
     if (!parsedData.headers.length || !parsedData.rows.length) {
-      showError("Die Datei ist leer oder enthalt keine Datenzeilen.");
+      showError("Die Datei ist leer oder enthält keine Datenzeilen.");
       return;
     }
 
@@ -89,7 +89,7 @@ async function handleFile(file) {
 
     // Check row limit
     if (parsedData.rows.length > MAX_ROWS) {
-      showError(`Maximal ${MAX_ROWS.toLocaleString("de-CH")} Zeilen erlaubt. Die Datei enthalt ${parsedData.rows.length.toLocaleString("de-CH")} Zeilen.`);
+      showError(`Maximal ${MAX_ROWS.toLocaleString("de-CH")} Zeilen erlaubt. Die Datei enthält ${parsedData.rows.length.toLocaleString("de-CH")} Zeilen.`);
       return;
     }
 
@@ -137,7 +137,7 @@ function parseCSV(file) {
       else if (tabs > commas) delimiter = "\t";
 
       const lines = text.split(/\r?\n/).filter((l) => l.trim());
-      if (lines.length < 2) return reject(new Error("Datei enthalt keine Kopfzeile."));
+      if (lines.length < 2) return reject(new Error("Datei enthält keine Kopfzeile."));
 
       const headers = parseLine(lines[0], delimiter);
       const rows = [];
