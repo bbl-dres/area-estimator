@@ -37,7 +37,13 @@
       "Bash(python python/main.py --coordinates data/buildings.csv --alti3d \"D:/SwissAlti3D\" --surface3d \"D:/swissSURFACE3D Raster\" -o data/output/results.csv)",
       "Bash(python python/main.py --coordinates data/buildings.csv --alti3d \"D:/SwissAlti3D\" --surface3d \"D:/swissSURFACE3D Raster\" --auto-fetch -o data/output/results.csv)",
       "Bash(python main.py --coordinates \"../data/buildings.csv\" --alti3d \"D:\\\\SwissAlti3D\" --surface3d \"D:\\\\swissSURFACE3D Raster\" --auto-fetch)",
-      "Bash(python main.py --footprints \"D:\\\\AV_lv95\\\\av_2056.gpkg\" --coordinates \"../data/buildings.csv\" --alti3d \"D:\\\\SwissAlti3D\" --surface3d \"D:\\\\swissSURFACE3D Raster\" --auto-fetch)"
+      "Bash(python main.py --footprints \"D:\\\\AV_lv95\\\\av_2056.gpkg\" --coordinates \"../data/buildings.csv\" --alti3d \"D:\\\\SwissAlti3D\" --surface3d \"D:\\\\swissSURFACE3D Raster\" --auto-fetch)",
+      "Read(//c/Users/DavidRasner/Documents/GitHub/landcover-survey/**)",
+      "Read(//c/Users/DavidRasner/Documents/GitHub/property-inventory/osm-height/**)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\DavidRasner\\Documents\\GitHub\\landcover-survey\\assets",
+      "c:\\Users\\DavidRasner\\Documents\\GitHub\\landcover-survey\\css"
     ]
   }
 }

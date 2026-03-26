@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gebaudevolumen — Volumen- und Flachenschatzung</title>
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" rel="stylesheet">
+
+  <!-- MapLibre GL JS -->
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" crossorigin="anonymous" />
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js" crossorigin="anonymous"></script>
+
+  <!-- GeoTIFF.js (COG reading) -->
+  <script src="https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js" crossorigin="anonymous"></script>
+
+  <!-- proj4 (coordinate transforms) -->
+  <script src="https://cdn.jsdelivr.net/npm/proj4@2.12.1/dist/proj4.js" crossorigin="anonymous"></script>
+
+  <!-- Turf.js (spatial operations) -->
+  <script src="https://unpkg.com/@turf/turf@7/turf.min.js" crossorigin="anonymous"></script>
+
+  <!-- App CSS -->
+  <link rel="stylesheet" href="css/tokens.css">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<noscript>
+  <div style="padding:2rem;text-align:center;font-family:system-ui,sans-serif">
+    <h1>JavaScript erforderlich</h1>
+    <p>Diese Anwendung benotigt JavaScript. Bitte aktivieren Sie JavaScript in Ihren Browser-Einstellungen.</p>
+  </div>
+</noscript>
+
+<div class="app">
+  <!-- Header -->
+  <header id="header">
+    <div class="header-left">
+      <img src="assets/swiss-logo-flag.svg" alt="" class="header-flag" width="20" height="22">
+      <div class="header-title">
+        <span class="header-agency">Bundesamt fur Bauten und Logistik</span>
+        <span class="header-app">Gebaudevolumen</span>
+      </div>
+    </div>
+
+    <!-- Search bar (center) -->
+    <div id="search-wrapper" class="search-wrapper" hidden>
+      <div class="search-container">
+        <span class="material-symbols-outlined search-icon" aria-hidden="true">search</span>
+        <input type="text" id="search-input" placeholder="Suche nach Gebauden oder Orten" autocomplete="off" aria-label="Suche">
+        <button id="search-clear-btn" class="search-clear" hidden aria-label="Suche loschen">&times;</button>
+      </div>
+      <div id="search-results" class="search-results" role="listbox" aria-label="Suchergebnisse" hidden></div>
+    </div>
+
+    <div class="header-right">
+      <button id="btn-new" class="btn btn-secondary" hidden>Neue Analyse</button>
+      <button id="btn-download" class="btn btn-primary" hidden>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        <span>Herunterladen</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main -->
+  <main id="main-content">
+
+    <!-- STATE 1: Upload -->
+    <section id="state-upload" class="app-state" aria-label="Datei hochladen">
+      <div class="upload-container">
+        <div class="upload-card">
+          <div class="intro">
+            <h1 class="intro-title">Gebaudevolumen und Geschossflachen schatzen</h1>
+            <p class="intro-desc">
+              Laden Sie eine CSV-Datei mit Gebaude-Koordinaten (lon/lat) oder EGID hoch.
+              Die App berechnet automatisch Volumen, Hohen und Geschossflachen
+              aus swisstopo-Hohenmodellen und dem Gebaude- und Wohnungsregister (GWR).
+            </p>
+          </div>
+
+          <div class="steps" role="list">
+            <div class="step" role="listitem">
+              <div class="step-number">1</div>
+              <div class="step-label"><span>Hochladen</span><br><span>CSV / XLSX</span></div>
+            </div>
+            <div class="step-arrow" aria-hidden="true">&#9654;</div>
+            <div class="step" role="listitem">
+              <div class="step-number">2</div>
+              <div class="step-label"><span>Berechnen</span><br><span>Volumen + Flachen</span></div>
+            </div>
+            <div class="step-arrow" aria-hidden="true">&#9654;</div>
+            <div class="step" role="listitem">
+              <div class="step-number">3</div>
+              <div class="step-label"><span>Exportieren</span><br><span>CSV / Excel</span></div>
+            </div>
+          </div>
+
+          <div id="drop-zone" class="drop-zone" role="button" tabindex="0" aria-label="Datei hier ablegen oder klicken">
+            <div class="drop-zone-icon" aria-hidden="true">
+              <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            </div>
+            <h2>CSV- oder Excel-Datei hierher ziehen</h2>
+            <p>oder klicken zum Durchsuchen</p>
+            <p class="drop-zone-hint">Erforderlich: id, lon, lat (oder id, egid) &middot; Max. 5'000 Zeilen</p>
+          </div>
+          <input type="file" id="file-input" accept=".csv,.xlsx,.xls,.tsv,.txt" hidden aria-label="Datei auswahlen">
+          <p class="demo-link"><a href="data/example.csv" download="vorlage-gebaeude.csv">Vorlage herunterladen (CSV)</a></p>
+          <p class="demo-link"><span>Oder testen Sie mit </span><a href="#" id="load-demo">Beispieldaten</a></p>
+
+          <div id="upload-error" class="upload-error" role="alert" hidden></div>
+
+          <div class="privacy-note">
+            <svg class="privacy-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            <span>Ihre Daten bleiben im Browser. Nur Koordinaten und EGID
+            werden an die swisstopo-API gesendet. Hohenmodelle werden direkt von data.geo.admin.ch geladen.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- STATE 2: Processing -->
+    <section id="state-processing" class="app-state" aria-label="Verarbeitung" hidden>
+      <div class="processing-container">
+        <div class="processing-card">
+          <h2>Gebaude werden analysiert...</h2>
+          <div class="progress-bar" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" aria-label="Fortschritt">
+            <div id="progress-bar-fill" class="progress-bar-fill"></div>
+          </div>
+          <div id="progress-text" aria-live="polite">Datei wird verarbeitet...</div>
+          <div id="progress-eta"></div>
+          <div id="progress-stats"></div>
+          <button id="btn-cancel" class="btn btn-secondary">Abbrechen</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- STATE 3: Results -->
+    <section id="state-results" class="app-state" aria-label="Ergebnisse" hidden>
+      <div class="results-container">
+
+        <!-- Main: map + table -->
+        <div class="results-main">
+          <div id="map-panel" class="map-panel">
+            <div id="results-map"></div>
+
+            <!-- Accordion tools menu -->
+            <div id="accordion-wrapper">
+              <aside id="accordion-panel" aria-label="Kartenwerkzeuge">
+                <div class="accordion-item" id="active-layers-accordion">
+                  <button class="accordion-header active" aria-expanded="true">
+                    <span class="accordion-arrow" aria-hidden="true"><span class="material-symbols-outlined">chevron_right</span></span>
+                    <span>Dargestellte Karten</span>
+                  </button>
+                  <div class="accordion-content show">
+                    <div class="layer-group">
+                      <div class="layer-group-label">Analyseergebnisse</div>
+                      <label class="active-layer-item">
+                        <input type="checkbox" class="active-layer-checkbox" checked id="layer-toggle-buildings">
+                        <span class="active-layer-title">Gebaude</span>
+                      </label>
+                      <label class="active-layer-item">
+                        <input type="checkbox" class="active-layer-checkbox" checked id="layer-toggle-labels">
+                        <span class="active-layer-title">Beschriftungen</span>
+                      </label>
+                    </div>
+                    <div class="layer-group">
+                      <div class="layer-group-label">Externe Karten</div>
+                      <label class="active-layer-item">
+                        <input type="checkbox" class="active-layer-checkbox" id="layer-toggle-av" data-swisstopo="ch.kantone.cadastralwebmap-farbe">
+                        <span class="active-layer-title">Amtliche Vermessung</span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              </aside>
+              <button id="menu-toggle" type="button">
+                <span class="material-symbols-outlined">expand_less</span>
+                <span id="menu-toggle-text">Menu schliessen</span>
+              </button>
+            </div>
+
+            <!-- Basemap selector -->
+            <div class="style-switcher" id="style-switcher">
+              <div class="style-switcher-panel" id="style-panel">
+                <button class="style-option active" data-style="positron" title="Hell">
+                  <img src="https://basemaps.cartocdn.com/light_all/8/134/91.png" alt="Hell" loading="lazy">
+                  <span>Hell</span>
+                </button>
+                <button class="style-option" data-style="voyager" title="Standard">
+                  <img src="https://basemaps.cartocdn.com/rastertiles/voyager/8/134/91.png" alt="Standard" loading="lazy">
+                  <span>Standard</span>
+                </button>
+                <button class="style-option" data-style="swissimage" title="Luftbild">
+                  <img src="https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.swissimage/default/current/3857/8/134/91.jpeg" alt="Luftbild" loading="lazy">
+                  <span>Luftbild</span>
+                </button>
+                <button class="style-option" data-style="dark-matter" title="Dunkel">
+                  <img src="https://basemaps.cartocdn.com/dark_all/8/134/91.png" alt="Dunkel" loading="lazy">
+                  <span>Dunkel</span>
+                </button>
+              </div>
+              <button class="style-switcher-btn" id="style-switcher-btn" title="Hintergrund wechseln">
+                <img id="current-style-thumb" src="https://basemaps.cartocdn.com/light_all/8/134/91.png" alt="Kartenstil" loading="lazy">
+                <span>Hintergrund</span>
+              </button>
+            </div>
+
+            <!-- Table toggle button -->
+            <button id="tbl-toggle" class="tbl-toggle" title="Tabelle ein-/ausblenden" aria-label="Tabelle ein-/ausblenden">
+              <span class="material-symbols-outlined" aria-hidden="true">expand_more</span>
+              <span class="tbl-toggle-label">Tabelle</span>
+            </button>
+          </div>
+          <div class="table-panel" id="results-table-container"></div>
+        </div>
+
+        <!-- Right summary panel -->
+        <aside id="summary-panel" class="summary-panel" aria-label="Zusammenfassung">
+          <div class="sp-header">
+            <h3>Zusammenfassung</h3>
+            <button id="sp-close" class="close-btn" aria-label="Schliessen">&times;</button>
+          </div>
+          <div class="sp-body" id="sp-body"></div>
+        </aside>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Download modal -->
+  <div id="download-overlay" class="dl-overlay" role="dialog" aria-modal="true" aria-label="Ergebnisse herunterladen" hidden>
+    <div class="dl-modal">
+      <div class="dl-header">
+        <h3>Ergebnisse herunterladen</h3>
+        <button id="dl-close" class="close-btn close-btn--lg" aria-label="Dialog schliessen">&times;</button>
+      </div>
+      <div class="dl-body">
+        <button class="dl-option" id="dl-csv">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <div class="dl-option-text"><strong>Ergebnisse CSV</strong><span>Volumen, Hohen und Geschossflachen pro Gebaude</span></div>
+        </button>
+        <button class="dl-option" id="dl-xlsx">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <div class="dl-option-text"><strong>Excel (.xlsx)</strong><span>Alle Ergebnisse in einem Workbook</span></div>
+        </button>
+        <button class="dl-option" id="dl-geojson">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+          <div class="dl-option-text"><strong>GeoJSON</strong><span>Gebaude-Polygone mit Attributen</span></div>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer id="footer">
+    <div class="footer-info"><span id="footer-coords">&mdash;</span></div>
+    <div class="footer-links">
+      <a href="https://github.com/bbl-dres/area-estimator" target="_blank" rel="noopener">Quellcode</a>
+      <a href="https://www.admin.ch/gov/de/start/rechtliches.html" target="_blank" rel="noopener">Rechtliches</a>
+    </div>
+  </footer>
+</div>
+
+<!-- App JS (ES modules) -->
+<script type="module" src="js/main.js"></script>
+
+</body>
+</html>
