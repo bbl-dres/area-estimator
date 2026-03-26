@@ -1,5 +1,7 @@
 # Swiss Building Volume & Area Estimator
 
+![Area Estimator](images/Social1.jpg)
+
 ![Python](https://img.shields.io/badge/python-3.10+-blue?logo=python&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![swisstopo](https://img.shields.io/badge/data-swisstopo-red)
