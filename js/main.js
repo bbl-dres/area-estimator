@@ -127,7 +127,7 @@ function cacheProgressEls() {
 function updateProgress(progress, startTime) {
   if (!progressEls.barFill) cacheProgressEls();
 
-  const { processed, total, succeeded, failed } = progress;
+  const { processed, total, succeeded, failed, noFootprint, noHeight, currentId } = progress;
   const pct = total > 0 ? ((processed / total) * 100).toFixed(1) : 0;
 
   progressEls.barFill.style.width = `${pct}%`;
@@ -141,9 +141,15 @@ function updateProgress(progress, startTime) {
   const etaMin = Math.floor(etaSeconds / 60);
   const etaSec = etaSeconds % 60;
   progressEls.eta.textContent = processed < total
-    ? `Geschatzt: ${etaMin}min ${etaSec}s verbleibend`
+    ? `Geschätzt: ${etaMin}min ${etaSec}s verbleibend`
     : "Abschluss...";
-  progressEls.stats.textContent = `Erfolgreich: ${succeeded} | Fehlgeschlagen: ${failed}`;
+
+  // Detailed breakdown
+  const parts = [`Erfolgreich: ${succeeded}`];
+  if (noFootprint) parts.push(`Kein Grundriss: ${noFootprint}`);
+  if (noHeight) parts.push(`Keine Höhe: ${noHeight}`);
+  if (failed - (noFootprint || 0) - (noHeight || 0) > 0) parts.push(`Fehler: ${failed - noFootprint - noHeight}`);
+  progressEls.stats.textContent = parts.join(" | ");
 }
 
 function showResults() {

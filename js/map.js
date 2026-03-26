@@ -17,13 +17,15 @@ function ensureGridCellsConverted() {
   if (gridCellsGeoJSON || !rawGridCells || rawGridCells.length === 0) return;
   const half = GRID_SPACING / 2;
   const features = rawGridCells.map((c) => {
-    const sw = fromLV95(c.x - half, c.y - half);
-    const se = fromLV95(c.x + half, c.y - half);
-    const ne = fromLV95(c.x + half, c.y + half);
-    const nw = fromLV95(c.x - half, c.y + half);
+    const cos = Math.cos(c.angle), sin = Math.sin(c.angle);
+    // Compute 4 corners of the rotated square in LV95
+    const corners = [[-half, -half], [half, -half], [half, half], [-half, half]].map(([dx, dy]) =>
+      fromLV95(c.x + dx * cos - dy * sin, c.y + dx * sin + dy * cos)
+    );
+    corners.push(corners[0]); // close ring
     return {
       type: "Feature",
-      geometry: { type: "Polygon", coordinates: [[sw, se, ne, nw, sw]] },
+      geometry: { type: "Polygon", coordinates: [corners] },
       properties: { h: Math.round(c.h * 10) / 10 },
     };
   });
@@ -147,10 +149,13 @@ export function plotResults(data) {
     });
   }
 
-  // Grid cells — store raw LV95 data, convert lazily on first toggle
+  // Grid cells — store raw LV95 data with angle, convert lazily on first toggle
   rawGridCells = data.buildings
     .filter((b) => b.grid_cells)
-    .flatMap((b) => b.grid_cells);
+    .flatMap((b) => {
+      const angle = b.grid_angle || 0;
+      return b.grid_cells.map((c) => ({ ...c, angle }));
+    });
   gridCellsGeoJSON = null;
 
   const emptyGeoJSON = { type: "FeatureCollection", features: [] };

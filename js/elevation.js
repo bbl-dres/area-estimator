@@ -129,8 +129,10 @@ export async function preloadTiles(pointsLV95, onProgress) {
 }
 
 // =============================================
-// Grid creation
+// Grid creation (orientation-aligned)
 // =============================================
+
+/** Ray-casting point-in-polygon test */
 function pointInPolygon(x, y, polygon) {
   let inside = false;
   for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
@@ -143,33 +145,129 @@ function pointInPolygon(x, y, polygon) {
   return inside;
 }
 
+/** Cross product of vectors OA and OB (for convex hull) */
+function cross(o, a, b) {
+  return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+}
+
+/** Monotone chain convex hull — returns points in CCW order, no duplicates */
+function convexHull(points) {
+  const pts = points.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const n = pts.length;
+  if (n <= 2) return pts.slice();
+
+  const lower = [];
+  for (const p of pts) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+    lower.push(p);
+  }
+  const upper = [];
+  for (let i = n - 1; i >= 0; i--) {
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], pts[i]) <= 0) upper.pop();
+    upper.push(pts[i]);
+  }
+  lower.pop();
+  upper.pop();
+  return lower.concat(upper);
+}
+
 /**
- * Create a grid of sample points inside a polygon (LV95 coordinates).
- * Uses axis-aligned grid at GRID_SPACING (1m).
+ * Minimum area bounding rectangle via rotating calipers on the convex hull.
+ * Returns the rotation angle (radians) of the longest edge.
+ */
+function getBuildingAngle(coordsLV95) {
+  const hull = convexHull(coordsLV95);
+  if (hull.length < 3) return 0;
+
+  let bestArea = Infinity;
+  let bestAngle = 0;
+  let bestLongestEdgeAngle = 0;
+
+  for (let i = 0; i < hull.length; i++) {
+    const j = (i + 1) % hull.length;
+    const edgeAngle = Math.atan2(hull[j][1] - hull[i][1], hull[j][0] - hull[i][0]);
+    const cos = Math.cos(-edgeAngle), sin = Math.sin(-edgeAngle);
+
+    // Rotate all hull points to align this edge with x-axis
+    let rxMin = Infinity, rxMax = -Infinity, ryMin = Infinity, ryMax = -Infinity;
+    for (const p of hull) {
+      const rx = p[0] * cos - p[1] * sin;
+      const ry = p[0] * sin + p[1] * cos;
+      if (rx < rxMin) rxMin = rx;
+      if (rx > rxMax) rxMax = rx;
+      if (ry < ryMin) ryMin = ry;
+      if (ry > ryMax) ryMax = ry;
+    }
+
+    const area = (rxMax - rxMin) * (ryMax - ryMin);
+    if (area < bestArea) {
+      bestArea = area;
+      bestAngle = edgeAngle;
+      // Determine longest edge of this bounding rectangle
+      const w = rxMax - rxMin, h = ryMax - ryMin;
+      bestLongestEdgeAngle = w >= h ? edgeAngle : edgeAngle + Math.PI / 2;
+    }
+  }
+
+  return bestLongestEdgeAngle;
+}
+
+/**
+ * Create grid points aligned to the building's orientation.
+ *
+ * 1. Compute orientation from minimum area bounding rectangle
+ * 2. Rotate polygon to align with axes
+ * 3. Generate regular grid in rotated space
+ * 4. Filter points inside the polygon
+ * 5. Rotate points back to original orientation
  */
 export function createGridPoints(coordsLV95, spacing = GRID_SPACING) {
+  // Compute centroid
+  let cx = 0, cy = 0;
+  for (const pt of coordsLV95) { cx += pt[0]; cy += pt[1]; }
+  cx /= coordsLV95.length;
+  cy /= coordsLV95.length;
+
+  // Get building orientation angle
+  const angle = getBuildingAngle(coordsLV95);
+  const cosA = Math.cos(-angle), sinA = Math.sin(-angle);
+
+  // Rotate polygon to align with axes (around centroid)
+  const rotated = coordsLV95.map((p) => {
+    const dx = p[0] - cx, dy = p[1] - cy;
+    return [cx + dx * cosA - dy * sinA, cy + dx * sinA + dy * cosA];
+  });
+
+  // Bounding box of rotated polygon, snapped to grid
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const pt of coordsLV95) {
+  for (const pt of rotated) {
     if (pt[0] < minX) minX = pt[0];
     if (pt[0] > maxX) maxX = pt[0];
     if (pt[1] < minY) minY = pt[1];
     if (pt[1] > maxY) maxY = pt[1];
   }
+  minX = Math.floor(minX / spacing) * spacing;
+  minY = Math.floor(minY / spacing) * spacing;
+  maxX = Math.ceil(maxX / spacing) * spacing;
+  maxY = Math.ceil(maxY / spacing) * spacing;
 
+  // Generate grid in rotated space, filter by polygon containment
+  const cosB = Math.cos(angle), sinB = Math.sin(angle);
   const points = [];
+
   for (let gx = minX + spacing / 2; gx < maxX; gx += spacing) {
     for (let gy = minY + spacing / 2; gy < maxY; gy += spacing) {
-      if (pointInPolygon(gx, gy, coordsLV95)) {
-        points.push([gx, gy]);
+      if (pointInPolygon(gx, gy, rotated)) {
+        // Rotate back to original orientation
+        const dx = gx - cx, dy = gy - cy;
+        points.push([cx + dx * cosB - dy * sinB, cy + dx * sinB + dy * cosB]);
       }
     }
   }
 
   // Fallback: centroid if grid is empty (very small footprint)
   if (points.length === 0) {
-    let cx = 0, cy = 0;
-    for (const pt of coordsLV95) { cx += pt[0]; cy += pt[1]; }
-    points.push([cx / coordsLV95.length, cy / coordsLV95.length]);
+    points.push([cx, cy]);
   }
   return points;
 }
@@ -198,6 +296,7 @@ export function polygonAreaLV95(ring) {
  * @returns {object|null} Volume result or null if no data
  */
 export function computeVolumeSync(coordsLV95) {
+  const gridAngle = getBuildingAngle(coordsLV95);
   const gridPoints = createGridPoints(coordsLV95);
   if (gridPoints.length === 0) return null;
 
@@ -278,6 +377,7 @@ export function computeVolumeSync(coordsLV95) {
     grid_points: dtmValues.length,
     grid_cells: cells,
     grid_spacing: GRID_SPACING,
+    grid_angle: gridAngle,
   };
 }
 

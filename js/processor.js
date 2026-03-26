@@ -25,6 +25,7 @@ export async function processRows(rows, onProgress) {
   cancelled = false;
   const total = rows.length;
   let processed = 0, succeeded = 0, failed = 0;
+  let noFootprint = 0, noHeight = 0;
 
   async function processOne(row) {
     if (cancelled) return null;
@@ -72,6 +73,7 @@ export async function processRows(rows, onProgress) {
       if (!footprint) {
         result.status = STATUS.NO_FOOTPRINT;
         failed++;
+        noFootprint++;
         return result;
       }
 
@@ -92,6 +94,7 @@ export async function processRows(rows, onProgress) {
         result.status = STATUS.NO_HEIGHT_DATA;
         result.area_footprint_m2 = Math.round(polygonAreaLV95(lv95Coords) * 100) / 100;
         failed++;
+        noHeight++;
         return result;
       }
 
@@ -171,7 +174,7 @@ export async function processRows(rows, onProgress) {
       results[idx] = r;
       processed++;
       releaseSlot();
-      onProgress({ processed, total, succeeded, failed });
+      onProgress({ processed, total, succeeded, failed, noFootprint, noHeight, currentId: rows[idx]?.id || "" });
     });
     allPromises.push(promise);
   }
