@@ -240,7 +240,7 @@ export function computeVolumeSync(coordsLV95) {
   for (let i = 0; i < dtmValues.length; i++) {
     const h = Math.max(dsmValues[i] - minDTM, 0);
     heights.push(h);
-    volume += h; // Each grid point represents 1m2 (GRID_SPACING = 1)
+    volume += h * GRID_SPACING * GRID_SPACING;
     cells.push({ x: validPoints[i][0], y: validPoints[i][1], h });
   }
 

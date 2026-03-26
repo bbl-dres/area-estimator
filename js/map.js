@@ -297,12 +297,17 @@ function initBasemapSwitcher() {
 
       map.setStyle(cfg.url);
       map.once("style.load", () => {
-        // Re-add data after style change
+        // Re-add data after style change, respecting toggle states
         if (savedData) {
+          const visFootprints = document.getElementById("layer-toggle-footprints")?.checked ? "visible" : "none";
+          const visBuildings = document.getElementById("layer-toggle-buildings")?.checked ? "visible" : "none";
+          const visLabels = document.getElementById("layer-toggle-labels")?.checked ? "visible" : "none";
+          const visGrid = document.getElementById("layer-toggle-grid")?.checked ? "visible" : "none";
+
           map.addSource("buildings", { type: "geojson", data: savedData });
-          // Re-add layers
           map.addLayer({
             id: "buildings-3d", type: "fill-extrusion", source: "buildings",
+            layout: { visibility: visBuildings },
             paint: {
               "fill-extrusion-color": ["case", ["==", ["get", "status"], "success"],
                 ["interpolate", ["linear"], ["coalesce", ["get", "height"], 0], 0, "#3498db", 10, "#2ecc71", 20, "#f39c12", 40, "#e74c3c"],
@@ -314,11 +319,12 @@ function initBasemapSwitcher() {
           });
           map.addLayer({
             id: "buildings-outline", type: "line", source: "buildings",
+            layout: { visibility: visFootprints },
             paint: { "line-color": ["case", ["==", ["get", "status"], "success"], "#1a365d", "#ef4444"], "line-width": 1.5 },
           });
           map.addLayer({
             id: "buildings-labels", type: "symbol", source: "buildings",
-            layout: { "text-field": ["get", "id"], "text-size": 11, "text-anchor": "center", "text-allow-overlap": false },
+            layout: { visibility: visLabels, "text-field": ["get", "id"], "text-size": 11, "text-anchor": "center", "text-allow-overlap": false },
             paint: { "text-color": "#1f2937", "text-halo-color": "#fff", "text-halo-width": 1.5 },
             minzoom: 15,
           });
@@ -326,7 +332,7 @@ function initBasemapSwitcher() {
             map.addSource("grid-cells", { type: "geojson", data: savedGrid });
             map.addLayer({
               id: "grid-cells-3d", type: "fill-extrusion", source: "grid-cells",
-              layout: { visibility: document.getElementById("layer-toggle-grid")?.checked ? "visible" : "none" },
+              layout: { visibility: visGrid },
               paint: {
                 "fill-extrusion-color": ["interpolate", ["linear"], ["get", "h"], 0, "#3498db", 10, "#2ecc71", 20, "#f39c12", 40, "#e74c3c"],
                 "fill-extrusion-height": ["get", "h"],

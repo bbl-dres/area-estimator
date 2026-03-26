@@ -70,7 +70,8 @@
       "Bash(curl -s \"https://api3.geo.admin.ch/rest/services/ech/SearchServer?searchText=Bundesplatz+3+Bern&type=locations&origins=address\")",
       "Bash(curl -s \"https://api3.geo.admin.ch/rest/services/ech/MapServer/find?layer=ch.bfs.gebaeude_wohnungs_register&searchText=2242547&searchField=egid&returnGeometry=false&contains=false\")",
       "Bash(curl -s \"https://api3.geo.admin.ch/rest/services/ech/MapServer/find?layer=ch.bfs.gebaeude_wohnungs_register&searchText=2242547&searchField=egid&returnGeometry=true&geometryFormat=geojson&contains=false\")",
-      "Bash(curl -s \"https://geodienste.ch/db/av_0/deu?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=ms:LCSF&OUTPUTFORMAT=geojson&SRSNAME=urn:ogc:def:crs:EPSG::4326&FILTER=%3CFilter%3E%3CPropertyIsEqualTo%3E%3CPropertyName%3EGWR_EGID%3C/PropertyName%3E%3CLiteral%3E190093984%3C/Literal%3E%3C/PropertyIsEqualTo%3E%3C/Filter%3E\")"
+      "Bash(curl -s \"https://geodienste.ch/db/av_0/deu?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=ms:LCSF&OUTPUTFORMAT=geojson&SRSNAME=urn:ogc:def:crs:EPSG::4326&FILTER=%3CFilter%3E%3CPropertyIsEqualTo%3E%3CPropertyName%3EGWR_EGID%3C/PropertyName%3E%3CLiteral%3E190093984%3C/Literal%3E%3C/PropertyIsEqualTo%3E%3C/Filter%3E\")",
+      "Bash(git add:*)"
     ],
     "additionalDirectories": [
       "c:\\Users\\DavidRasner\\Documents\\GitHub\\landcover-survey\\assets",

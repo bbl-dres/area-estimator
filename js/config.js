@@ -6,7 +6,7 @@
 export const MAX_ROWS = 5000;
 
 /** Grid spacing for volume computation (meters) */
-export const GRID_SPACING = 1;
+export const GRID_SPACING = 2;
 
 /** Concurrency for parallel API requests */
 export const CONCURRENCY = 5;
