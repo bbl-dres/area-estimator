@@ -1,5 +1,6 @@
 # Local data directories (large raster tiles, CSV downloads, AV files)
-data/
+data/*
+!data/example.csv
 
 # Output files and logs (anywhere in repo)
 *.log
