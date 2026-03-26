@@ -7,7 +7,7 @@
  */
 
 import { API, CONCURRENCY, STATUS, getFloorHeight, determineAccuracy } from "./config.js";
-import { toLV95, fromLV95, preloadTiles, computeVolumeSync, polygonAreaLV95 } from "./elevation.js";
+import { toLV95, preloadTiles, computeVolumeSync, polygonAreaLV95 } from "./elevation.js";
 
 let cancelled = false;
 
@@ -179,28 +179,24 @@ async function fetchFootprint(row) {
   const lat = parseFloat(row.lat);
   const egid = row.egid ? String(row.egid).trim() : null;
 
-  // Strategy 1: If we have coordinates, query WFS with bbox
-  if (!isNaN(lon) && !isNaN(lat)) {
-    return await fetchFootprintByCoords(lon, lat, egid);
-  }
-
-  // Strategy 2: If we only have EGID, find location via swisstopo API then query WFS
+  // Strategy 1: If we have EGID, query AV WFS directly by GWR_EGID filter
   if (egid) {
     return await fetchFootprintByEGID(egid);
+  }
+
+  // Strategy 2: If we have coordinates, query WFS with bbox
+  if (!isNaN(lon) && !isNaN(lat)) {
+    return await fetchFootprintByCoords(lon, lat, egid);
   }
 
   return null;
 }
 
 async function fetchFootprintByCoords(lon, lat, egid) {
-  // Convert to LV95 for bbox
-  const [x, y] = toLV95(lon, lat);
-
-  // Query AV WFS with 50m buffer bbox
-  const buffer = 50;
-  const bbox = `${lat - 0.0005},${lon - 0.0007},${lat + 0.0005},${lon + 0.0007}`;
+  // Query AV WFS with ~50m buffer bbox in WGS84
+  const bbox = `${lat - 0.0005},${lon - 0.0007},${lat + 0.0005},${lon + 0.0007},urn:ogc:def:crs:EPSG::4326`;
   const wfsUrl = `${API.WFS_AV}?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature` +
-    `&TYPENAMES=ms:LCSF&OUTPUTFORMAT=geojson&COUNT=100&BBOX=${bbox}`;
+    `&TYPENAMES=ms:LCSF&OUTPUTFORMAT=geojson&COUNT=100&SRSNAME=urn:ogc:def:crs:EPSG::4326&BBOX=${bbox}`;
 
   try {
     const resp = await fetchWithTimeout(wfsUrl, 15000);
@@ -208,8 +204,7 @@ async function fetchFootprintByCoords(lon, lat, egid) {
     const data = await resp.json();
 
     if (!data.features || data.features.length === 0) {
-      // Fallback: try swisstopo identify
-      return await fetchFootprintViaSwisstopo(lon, lat, egid);
+      return null;
     }
 
     // Find building features (Art = "Gebaeude" or "Gebäude")
@@ -219,7 +214,7 @@ async function fetchFootprintByCoords(lon, lat, egid) {
     });
 
     if (buildings.length === 0) {
-      return await fetchFootprintViaSwisstopo(lon, lat, egid);
+      return null;
     }
 
     // Find the building containing or nearest to the point
@@ -242,7 +237,7 @@ async function fetchFootprintByCoords(lon, lat, egid) {
       }
     }
 
-    if (!best) return await fetchFootprintViaSwisstopo(lon, lat, egid);
+    if (!best) return null;
 
     // Normalize geometry to Polygon
     let geom = best.geometry;
@@ -256,75 +251,38 @@ async function fetchFootprintByCoords(lon, lat, egid) {
       area: best.properties.flaeche || best.properties.Flaeche || best.properties.area || null,
     };
   } catch (err) {
-    // Fallback to swisstopo
-    return await fetchFootprintViaSwisstopo(lon, lat, egid);
+    console.warn("AV WFS query failed:", err);
+    return null;
   }
 }
 
 async function fetchFootprintByEGID(egid) {
-  // Step 1: Find building location via swisstopo search
-  const searchUrl = `${API.SEARCH}?searchText=${encodeURIComponent(egid)}&type=locations&origins=address`;
+  // Query AV WFS directly by GWR_EGID attribute filter
+  const filter = `<Filter><PropertyIsEqualTo><PropertyName>GWR_EGID</PropertyName><Literal>${egid}</Literal></PropertyIsEqualTo></Filter>`;
+  const wfsUrl = `${API.WFS_AV}?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature` +
+    `&TYPENAMES=ms:LCSF&OUTPUTFORMAT=geojson&SRSNAME=urn:ogc:def:crs:EPSG::4326` +
+    `&FILTER=${encodeURIComponent(filter)}`;
+
   try {
-    const resp = await fetchWithTimeout(searchUrl, 10000);
+    const resp = await fetchWithTimeout(wfsUrl, 15000);
     if (!resp.ok) return null;
     const data = await resp.json();
 
-    if (!data.results || data.results.length === 0) return null;
+    if (!data.features || data.features.length === 0) return null;
 
-    // Find the GWR feature
-    const gwrResult = data.results.find((r) =>
-      r.attrs && r.attrs.featureId && r.attrs.layer &&
-      r.attrs.layer.includes("gebaeude_wohnungs_register")
-    );
-
-    if (gwrResult && gwrResult.attrs) {
-      const lon = gwrResult.attrs.lon;
-      const lat = gwrResult.attrs.lat;
-      if (lon && lat) {
-        return await fetchFootprintByCoords(lon, lat, egid);
-      }
+    const feature = data.features[0];
+    let geom = feature.geometry;
+    if (geom.type === "MultiPolygon") {
+      geom = { type: "Polygon", coordinates: geom.coordinates[0] };
     }
 
-    // Try first result with coordinates
-    for (const r of data.results) {
-      if (r.attrs && r.attrs.lon && r.attrs.lat) {
-        return await fetchFootprintByCoords(r.attrs.lon, r.attrs.lat, egid);
-      }
-    }
+    return {
+      geometry: geom,
+      egid: feature.properties.GWR_EGID || egid,
+      area: null,
+    };
   } catch (err) {
-    console.warn("EGID lookup failed:", err);
-  }
-  return null;
-}
-
-async function fetchFootprintViaSwisstopo(lon, lat, egid) {
-  // Use swisstopo identify on the AV building layer
-  const identifyUrl = `${API.IDENTIFY}?geometry=${lon},${lat}&geometryType=esriGeometryPoint` +
-    `&layers=all:ch.swisstopo.amtliches-gebaeudeverzeichnis&mapExtent=0,0,1,1&imageDisplay=1,1,96` +
-    `&tolerance=50&returnGeometry=true&geometryFormat=geojson&sr=4326`;
-
-  try {
-    const resp = await fetchWithTimeout(identifyUrl, 10000);
-    if (!resp.ok) return null;
-    const data = await resp.json();
-
-    if (!data.results || data.results.length === 0) return null;
-
-    // Find best match
-    const result = data.results[0];
-    if (result.geometry) {
-      let geom = result.geometry;
-      if (geom.type === "MultiPolygon") {
-        geom = { type: "Polygon", coordinates: geom.coordinates[0] };
-      }
-      return {
-        geometry: geom,
-        egid: result.attributes?.egid || result.properties?.egid || egid,
-        area: result.attributes?.area || null,
-      };
-    }
-  } catch (err) {
-    console.warn("Swisstopo identify failed:", err);
+    console.warn("AV WFS EGID query failed:", err);
   }
   return null;
 }
@@ -341,26 +299,16 @@ async function fetchGWR(egid) {
   if (gwrCache.has(key)) return gwrCache.get(key);
 
   try {
-    // Search for the EGID
-    const searchUrl = `${API.SEARCH}?searchText=${encodeURIComponent(key)}&type=locations&origins=address`;
-    const resp = await fetchWithTimeout(searchUrl, 10000);
-    if (!resp.ok) return null;
+    // Exact EGID match via MapServer find
+    const findUrl = `${API.GWR_FIND}?layer=ch.bfs.gebaeude_wohnungs_register` +
+      `&searchText=${encodeURIComponent(key)}&searchField=egid&returnGeometry=false&contains=false`;
+    const resp = await fetchWithTimeout(findUrl, 10000);
+    if (!resp.ok) { gwrCache.set(key, null); return null; }
     const data = await resp.json();
 
-    // Find GWR feature
-    const gwrResult = data.results?.find((r) =>
-      r.attrs?.featureId && r.attrs?.layer?.includes("gebaeude_wohnungs_register")
-    );
+    if (!data.results || data.results.length === 0) { gwrCache.set(key, null); return null; }
 
-    if (!gwrResult) { gwrCache.set(key, null); return null; }
-
-    // Fetch full GWR attributes
-    const detailUrl = `${API.GWR_DETAIL}/${gwrResult.attrs.featureId}`;
-    const detailResp = await fetchWithTimeout(detailUrl, 10000);
-    if (!detailResp.ok) { gwrCache.set(key, null); return null; }
-    const detail = await detailResp.json();
-
-    const attrs = detail.feature?.attributes || {};
+    const attrs = data.results[0].attributes || {};
     const result = {
       gkat: attrs.gkat || null,
       gklas: attrs.gklas || null,

@@ -13,16 +13,10 @@ export const CONCURRENCY = 5;
 
 /** API endpoints */
 export const API = {
-  /** swisstopo MapServer — find features by attribute */
-  PARCEL_FIND: "https://api3.geo.admin.ch/rest/services/all/MapServer/find",
-  /** swisstopo SearchServer — geocode addresses/locations */
-  SEARCH: "https://api3.geo.admin.ch/rest/services/ech/SearchServer",
-  /** swisstopo MapServer — identify features at a point */
-  IDENTIFY: "https://api3.geo.admin.ch/rest/services/all/MapServer/identify",
   /** AV WFS — building footprints from official survey */
   WFS_AV: "https://geodienste.ch/db/av_0/deu",
-  /** GWR feature detail */
-  GWR_DETAIL: "https://api3.geo.admin.ch/rest/services/ech/MapServer/ch.bfs.gebaeude_wohnungs_register",
+  /** swisstopo MapServer find — exact attribute search (GWR EGID lookup) */
+  GWR_FIND: "https://api3.geo.admin.ch/rest/services/ech/MapServer/find",
 };
 
 /** COG tile URL templates */
