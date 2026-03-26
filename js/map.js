@@ -2,13 +2,36 @@
  * Map module — MapLibre GL with 3D building extrusions, basemap switching,
  * accordion menu, and building popups.
  */
-import { MAP_STYLES, MAP_DEFAULT, esc, fmtNum } from "./config.js";
+import { MAP_STYLES, MAP_DEFAULT, GRID_SPACING, esc, fmtNum } from "./config.js";
+import { fromLV95 } from "./elevation.js";
 
 let map = null;
 let buildingsGeoJSON = null;
 let gridCellsGeoJSON = null;
+let rawGridCells = null;
 let callbacks = {};
 let summaryToggleCb = null;
+
+/** Convert raw LV95 grid cells to WGS84 GeoJSON on first use */
+function ensureGridCellsConverted() {
+  if (gridCellsGeoJSON || !rawGridCells || rawGridCells.length === 0) return;
+  const half = GRID_SPACING / 2;
+  const features = rawGridCells.map((c) => {
+    const sw = fromLV95(c.x - half, c.y - half);
+    const se = fromLV95(c.x + half, c.y - half);
+    const ne = fromLV95(c.x + half, c.y + half);
+    const nw = fromLV95(c.x - half, c.y + half);
+    return {
+      type: "Feature",
+      geometry: { type: "Polygon", coordinates: [[sw, se, ne, nw, sw]] },
+      properties: { h: Math.round(c.h * 10) / 10 },
+    };
+  });
+  gridCellsGeoJSON = { type: "FeatureCollection", features };
+  if (map && map.getSource("grid-cells")) {
+    map.getSource("grid-cells").setData(gridCellsGeoJSON);
+  }
+}
 
 export function onSummaryToggle(cb) { summaryToggleCb = cb; }
 export function setSummaryToggleVisible(visible) {
@@ -124,17 +147,17 @@ export function plotResults(data) {
     });
   }
 
-  // Grid cells — collect from all buildings
-  const gridFeatures = data.buildings
-    .filter((b) => b.grid_features)
-    .flatMap((b) => b.grid_features);
+  // Grid cells — store raw LV95 data, convert lazily on first toggle
+  rawGridCells = data.buildings
+    .filter((b) => b.grid_cells)
+    .flatMap((b) => b.grid_cells);
+  gridCellsGeoJSON = null;
 
-  gridCellsGeoJSON = { type: "FeatureCollection", features: gridFeatures };
-
+  const emptyGeoJSON = { type: "FeatureCollection", features: [] };
   if (map.getSource("grid-cells")) {
-    map.getSource("grid-cells").setData(gridCellsGeoJSON);
+    map.getSource("grid-cells").setData(emptyGeoJSON);
   } else {
-    map.addSource("grid-cells", { type: "geojson", data: gridCellsGeoJSON });
+    map.addSource("grid-cells", { type: "geojson", data: emptyGeoJSON });
   }
 
   if (!map.getLayer("grid-cells-3d")) {
@@ -223,6 +246,9 @@ export function plotResults(data) {
     }
   });
   document.getElementById("layer-toggle-grid")?.addEventListener("change", (e) => {
+    if (e.target.checked) {
+      ensureGridCellsConverted();
+    }
     if (map.getLayer("grid-cells-3d")) {
       map.setLayoutProperty("grid-cells-3d", "visibility", e.target.checked ? "visible" : "none");
     }
@@ -293,7 +319,6 @@ function initBasemapSwitcher() {
 
       // Remember current state
       const savedData = buildingsGeoJSON;
-      const savedGrid = gridCellsGeoJSON;
 
       map.setStyle(cfg.url);
       map.once("style.load", () => {
@@ -328,19 +353,18 @@ function initBasemapSwitcher() {
             paint: { "text-color": "#1f2937", "text-halo-color": "#fff", "text-halo-width": 1.5 },
             minzoom: 15,
           });
-          if (savedGrid) {
-            map.addSource("grid-cells", { type: "geojson", data: savedGrid });
-            map.addLayer({
-              id: "grid-cells-3d", type: "fill-extrusion", source: "grid-cells",
-              layout: { visibility: visGrid },
-              paint: {
-                "fill-extrusion-color": ["interpolate", ["linear"], ["get", "h"], 0, "#3498db", 10, "#2ecc71", 20, "#f39c12", 40, "#e74c3c"],
-                "fill-extrusion-height": ["get", "h"],
-                "fill-extrusion-base": 0,
-                "fill-extrusion-opacity": 0.85,
-              },
-            });
-          }
+          const gridData = gridCellsGeoJSON || { type: "FeatureCollection", features: [] };
+          map.addSource("grid-cells", { type: "geojson", data: gridData });
+          map.addLayer({
+            id: "grid-cells-3d", type: "fill-extrusion", source: "grid-cells",
+            layout: { visibility: visGrid },
+            paint: {
+              "fill-extrusion-color": ["interpolate", ["linear"], ["get", "h"], 0, "#3498db", 10, "#2ecc71", 20, "#f39c12", 40, "#e74c3c"],
+              "fill-extrusion-height": ["get", "h"],
+              "fill-extrusion-base": 0,
+              "fill-extrusion-opacity": 0.85,
+            },
+          });
         }
       });
 

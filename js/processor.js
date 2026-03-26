@@ -6,8 +6,8 @@
  * 4. Optionally estimate floor areas via GWR lookup
  */
 
-import { API, CONCURRENCY, GRID_SPACING, STATUS, getFloorHeight, determineAccuracy } from "./config.js";
-import { toLV95, fromLV95, preloadTiles, computeVolumeSync, polygonAreaLV95 } from "./elevation.js";
+import { API, CONCURRENCY, STATUS, getFloorHeight, determineAccuracy } from "./config.js";
+import { toLV95, preloadTiles, computeVolumeSync, polygonAreaLV95 } from "./elevation.js";
 
 let cancelled = false;
 
@@ -25,8 +25,6 @@ export async function processRows(rows, onProgress) {
   cancelled = false;
   const total = rows.length;
   let processed = 0, succeeded = 0, failed = 0;
-
-  const results = [];
 
   async function processOne(row) {
     if (cancelled) return null;
@@ -97,29 +95,11 @@ export async function processRows(rows, onProgress) {
         return result;
       }
 
-      // Copy volume results (exclude grid_cells from result object)
+      // Copy volume results (keep grid_cells as lightweight LV95 data for lazy conversion)
       const { grid_cells, ...volResults } = vol;
       Object.assign(result, volResults);
+      if (grid_cells) result.grid_cells = grid_cells;
       result.status = STATUS.SUCCESS;
-
-      // Convert grid cells to WGS84 square polygons for map visualization
-      if (grid_cells && grid_cells.length > 0) {
-        const half = GRID_SPACING / 2;
-        result.grid_features = grid_cells.map((c) => {
-          const sw = fromLV95(c.x - half, c.y - half);
-          const se = fromLV95(c.x + half, c.y - half);
-          const ne = fromLV95(c.x + half, c.y + half);
-          const nw = fromLV95(c.x - half, c.y + half);
-          return {
-            type: "Feature",
-            geometry: {
-              type: "Polygon",
-              coordinates: [[sw, se, ne, nw, sw]],
-            },
-            properties: { h: Math.round(c.h * 10) / 10 },
-          };
-        });
-      }
       succeeded++;
 
       // Try GWR lookup for floor area estimation
@@ -157,33 +137,49 @@ export async function processRows(rows, onProgress) {
     return result;
   }
 
-  // Process with bounded concurrency using a simple semaphore
+  // Process with bounded concurrency using a slot-based semaphore
+  const results = new Array(total);
   let running = 0;
+  let nextResolve = null;
+
+  function releaseSlot() {
+    running--;
+    if (nextResolve) {
+      const resolve = nextResolve;
+      nextResolve = null;
+      resolve();
+    }
+  }
+
+  function acquireSlot() {
+    if (running < CONCURRENCY) {
+      running++;
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => { nextResolve = resolve; }).then(() => { running++; });
+  }
+
   const allPromises = [];
 
   for (let i = 0; i < total; i++) {
     if (cancelled) return null;
 
-    // Wait if at concurrency limit
-    while (running >= CONCURRENCY) {
-      await new Promise((r) => setTimeout(r, 50));
-    }
+    await acquireSlot();
 
-    running++;
-    const promise = processOne(rows[i]).then((r) => {
-      if (r) results.push(r);
+    const idx = i;
+    const promise = processOne(rows[idx]).then((r) => {
+      results[idx] = r;
       processed++;
-      running--;
+      releaseSlot();
       onProgress({ processed, total, succeeded, failed });
     });
     allPromises.push(promise);
   }
 
-  // Wait for remaining
   await Promise.all(allPromises);
 
   if (cancelled) return null;
-  return { buildings: results };
+  return { buildings: results.filter(Boolean) };
 }
 
 // =============================================
@@ -277,6 +273,9 @@ async function fetchFootprintByCoords(lon, lat, egid) {
 }
 
 async function fetchFootprintByEGID(egid) {
+  // Validate EGID is numeric to prevent XML injection in filter
+  if (!/^\d+$/.test(egid)) return null;
+
   // Query AV WFS directly by GWR_EGID attribute filter
   const filter = `<Filter><PropertyIsEqualTo><PropertyName>GWR_EGID</PropertyName><Literal>${egid}</Literal></PropertyIsEqualTo></Filter>`;
   const wfsUrl = `${API.WFS_AV}?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature` +

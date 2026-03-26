@@ -226,13 +226,19 @@ export function computeVolumeSync(coordsLV95) {
   if (dtmValues.length === 0) return null;
 
   // Use minimum terrain elevation as base datum (flat base)
-  const minDTM = Math.min(...dtmValues);
-  const maxDTM = Math.max(...dtmValues);
-  const meanDTM = dtmValues.reduce((a, b) => a + b, 0) / dtmValues.length;
-
-  const minDSM = Math.min(...dsmValues);
-  const maxDSM = Math.max(...dsmValues);
-  const meanDSM = dsmValues.reduce((a, b) => a + b, 0) / dsmValues.length;
+  let minDTM = Infinity, maxDTM = -Infinity, sumDTM = 0;
+  let minDSM = Infinity, maxDSM = -Infinity, sumDSM = 0;
+  for (let i = 0; i < dtmValues.length; i++) {
+    const d = dtmValues[i], s = dsmValues[i];
+    if (d < minDTM) minDTM = d;
+    if (d > maxDTM) maxDTM = d;
+    sumDTM += d;
+    if (s < minDSM) minDSM = s;
+    if (s > maxDSM) maxDSM = s;
+    sumDSM += s;
+  }
+  const meanDTM = sumDTM / dtmValues.length;
+  const meanDSM = sumDSM / dsmValues.length;
 
   // Heights measured from lowest terrain point
   let volume = 0;
