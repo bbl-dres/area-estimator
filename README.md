@@ -391,6 +391,45 @@ area-estimator/
 
 ---
 
+## Tech Stack & Credits
+
+### Web App
+
+| Library | Version | Purpose |
+|---------|---------|---------|
+| [MapLibre GL JS](https://maplibre.org/) | 4.7 | Interactive map with 3D fill-extrusion rendering |
+| [GeoTIFF.js](https://geotiffjs.github.io/) | 2.1 | Cloud Optimized GeoTIFF (COG) reading in-browser |
+| [Turf.js](https://turfjs.org/) | 7 | Spatial operations (point-in-polygon, distance, centroid) |
+| [proj4js](http://proj4js.org/) | 2.12 | Coordinate transforms (WGS84 ↔ LV95/EPSG:2056) |
+| [SheetJS (XLSX)](https://sheetjs.com/) | 0.18 | Excel import/export (lazy-loaded) |
+| [Source Sans 3](https://fonts.google.com/specimen/Source+Sans+3) | — | Typography |
+| [Material Symbols](https://fonts.google.com/icons) | — | UI icons |
+
+### Python CLI
+
+| Library | Purpose |
+|---------|---------|
+| [GeoPandas](https://geopandas.org/) | Vector geodata processing |
+| [Rasterio](https://rasterio.readthedocs.io/) | GeoTIFF reading with windowed access |
+| [Shapely](https://shapely.readthedocs.io/) | Geometry operations, minimum rotated rectangle |
+| [NumPy](https://numpy.org/) | Vectorized grid creation and elevation sampling |
+| [pyproj](https://pyproj4.github.io/pyproj/) | CRS transforms |
+
+### Data Sources
+
+| Provider | Dataset | Usage |
+|----------|---------|-------|
+| [swisstopo](https://www.swisstopo.admin.ch/) | swissALTI3D, swissSURFACE3D | Terrain (DTM) and surface (DSM) elevation models at 0.5m resolution |
+| [geodienste.ch](https://www.geodienste.ch/) | Amtliche Vermessung (AV) WFS | Building footprints from official cadastral survey |
+| [BFS](https://www.bfs.admin.ch/) | GWR (Gebäude- und Wohnungsregister) | Building classification, construction year, floor count |
+| [CARTO](https://carto.com/) | Positron, Dark Matter | Basemap tiles |
+
+### Methodology
+
+Floor area estimation is based on the methodology developed by Seiler & Seiler GmbH (Dec 2020) for the [Canton of Zurich ARE](https://are.zh.ch/).
+
+---
+
 ## License
 
 MIT License — see [LICENSE](LICENSE).
