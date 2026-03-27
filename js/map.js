@@ -35,11 +35,33 @@ const GRID_PAINT = {
   "fill-extrusion-base": 0,
   "fill-extrusion-opacity": 0.85,
 };
+const STOREY_PAINT = {
+  "fill-extrusion-color": ["interpolate", ["linear"], ["get", "storey"],
+    1, "#4a90d9", 2, "#3498db", 3, "#2ecc71", 5, "#f39c12", 8, "#e74c3c"],
+  "fill-extrusion-height": ["get", "top"],
+  "fill-extrusion-base": ["get", "base"],
+  "fill-extrusion-opacity": 0.75,
+};
+
+// Cluster style constants
+const CLUSTER_COLORS = [
+  [100, "#e74c3c"],   // 100+ buildings: red
+  [20,  "#f39c12"],   // 20–99: orange
+  [0,   "#3498db"],   // 0–19: blue
+];
+const CLUSTER_RADII = [
+  [100, 30],
+  [20,  24],
+  [0,   18],
+];
 
 let map = null;
 let buildingsGeoJSON = null;
+let clusterGeoJSON = null;
 let gridCellsGeoJSON = null;
 let rawGridCells = null;
+let storeyPolygonsGeoJSON = null;
+let rawStoreyData = null;
 let callbacks = {};
 let summaryToggleCb = null;
 
@@ -63,6 +85,31 @@ function ensureGridCellsConverted() {
   gridCellsGeoJSON = { type: "FeatureCollection", features };
   if (map && map.getSource("grid-cells")) {
     map.getSource("grid-cells").setData(gridCellsGeoJSON);
+  }
+}
+
+/** Convert raw LV95 storey polygons to WGS84 GeoJSON on first use */
+function ensureStoreyPolygonsConverted() {
+  if (storeyPolygonsGeoJSON || !rawStoreyData || rawStoreyData.length === 0) return;
+  const features = rawStoreyData.map((sp) => {
+    // Convert polygon rings from LV95 to WGS84
+    const geom = sp.polygonLV95;
+    const convertRing = (ring) => ring.map(([x, y]) => fromLV95(x, y));
+    let coordinates;
+    if (geom.type === "MultiPolygon") {
+      coordinates = geom.coordinates.map((poly) => poly.map(convertRing));
+    } else {
+      coordinates = geom.coordinates.map(convertRing);
+    }
+    return {
+      type: "Feature",
+      geometry: { type: geom.type, coordinates },
+      properties: { storey: sp.storey, base: sp.base, top: sp.top, buildingIndex: sp.buildingIndex },
+    };
+  });
+  storeyPolygonsGeoJSON = { type: "FeatureCollection", features };
+  if (map && map.getSource("storey-polygons")) {
+    map.getSource("storey-polygons").setData(storeyPolygonsGeoJSON);
   }
 }
 
@@ -105,6 +152,106 @@ export async function initMap(containerId, cbs) {
   document.getElementById("style-switcher")?.classList.add("visible");
 }
 
+/** Build a point FeatureCollection of building centroids for clustering */
+function buildClusterPoints(buildings) {
+  const pts = buildings
+    .filter((b) => b.geometry)
+    .map((b, i) => {
+      const centroid = turf.centroid({ type: "Feature", geometry: b.geometry });
+      return {
+        type: "Feature",
+        geometry: centroid.geometry,
+        properties: {
+          _index: i,
+          id: b.input_id,
+          status: b.status,
+        },
+      };
+    });
+  return { type: "FeatureCollection", features: pts };
+}
+
+/** Add cluster source and layers to the map */
+function addClusterLayers(visible) {
+  if (!clusterGeoJSON) return;
+  const vis = visible ? "visible" : "none";
+
+  if (!map.getSource("buildings-clustered")) {
+    map.addSource("buildings-clustered", {
+      type: "geojson",
+      data: clusterGeoJSON,
+      cluster: true,
+      clusterMaxZoom: 14,
+      clusterRadius: 50,
+    });
+  }
+
+  // Cluster circles
+  if (!map.getLayer("clusters")) {
+    map.addLayer({
+      id: "clusters",
+      type: "circle",
+      source: "buildings-clustered",
+      filter: ["has", "point_count"],
+      layout: { visibility: vis },
+      paint: {
+        "circle-color": [
+          "step", ["get", "point_count"],
+          CLUSTER_COLORS[2][1], CLUSTER_COLORS[1][0],
+          CLUSTER_COLORS[1][1], CLUSTER_COLORS[0][0],
+          CLUSTER_COLORS[0][1],
+        ],
+        "circle-radius": [
+          "step", ["get", "point_count"],
+          CLUSTER_RADII[2][1], CLUSTER_RADII[1][0],
+          CLUSTER_RADII[1][1], CLUSTER_RADII[0][0],
+          CLUSTER_RADII[0][1],
+        ],
+        "circle-stroke-width": 2,
+        "circle-stroke-color": "#fff",
+      },
+    });
+  }
+
+  // Cluster count labels
+  if (!map.getLayer("cluster-count")) {
+    map.addLayer({
+      id: "cluster-count",
+      type: "symbol",
+      source: "buildings-clustered",
+      filter: ["has", "point_count"],
+      layout: {
+        visibility: vis,
+        "text-field": ["get", "point_count_abbreviated"],
+        "text-size": 12,
+        "text-allow-overlap": true,
+      },
+      paint: {
+        "text-color": "#fff",
+      },
+    });
+  }
+
+  // Unclustered individual points
+  if (!map.getLayer("unclustered-point")) {
+    map.addLayer({
+      id: "unclustered-point",
+      type: "circle",
+      source: "buildings-clustered",
+      filter: ["!", ["has", "point_count"]],
+      layout: { visibility: vis },
+      paint: {
+        "circle-color": [
+          "case", ["==", ["get", "status"], "success"], "#3498db", "#95a5a6",
+        ],
+        "circle-radius": 6,
+        "circle-stroke-width": 1.5,
+        "circle-stroke-color": "#fff",
+      },
+    });
+  }
+}
+
 export function plotResults(data) {
   if (!map || !data || !data.buildings) return;
 
@@ -130,6 +277,9 @@ export function plotResults(data) {
     }));
 
   buildingsGeoJSON = { type: "FeatureCollection", features };
+
+  // Build cluster point data
+  clusterGeoJSON = buildClusterPoints(data.buildings);
 
   // Add source
   if (map.getSource("buildings")) {
@@ -158,6 +308,10 @@ export function plotResults(data) {
     });
   }
 
+  // Cluster layers
+  const clusterToggle = document.getElementById("layer-toggle-clusters");
+  addClusterLayers(!clusterToggle || clusterToggle.checked);
+
   // Grid cells — store raw LV95 data with angle, convert lazily on first toggle
   rawGridCells = data.buildings
     .filter((b) => b.grid_cells)
@@ -181,6 +335,81 @@ export function plotResults(data) {
       source: "grid-cells",
       layout: { visibility: "none" },
       paint: GRID_PAINT,
+    });
+  }
+
+  // Storey polygons — compute merged polygon per storey per building
+  rawStoreyData = [];
+  storeyPolygonsGeoJSON = null;
+  const half = GRID_SPACING / 2;
+
+  for (let bi = 0; bi < data.buildings.length; bi++) {
+    const b = data.buildings[bi];
+    if (!b.grid_cells || !b.floor_height_used || b.floor_height_used <= 0) continue;
+
+    const floorH = b.floor_height_used;
+    const angle = b.grid_angle || 0;
+    const cos = Math.cos(angle), sin = Math.sin(angle);
+    const maxH = Math.max(...b.grid_cells.map((c) => c.h));
+    const maxStoreys = Math.ceil(maxH / floorH);
+
+    for (let s = 1; s <= maxStoreys; s++) {
+      const threshold = (s - 1) * floorH;
+      const cellsAtLevel = b.grid_cells.filter((c) => c.h > threshold);
+
+      // Skip storey if fewer than 50% of cells reach it (partial roof artefact)
+      if (cellsAtLevel.length < b.grid_cells.length * 0.5 && s > Math.floor(maxH / floorH)) continue;
+      if (cellsAtLevel.length === 0) continue;
+
+      // Build cell polygons in LV95 for union
+      const cellFeatures = cellsAtLevel.map((c) => {
+        const corners = [[-half, -half], [half, -half], [half, half], [-half, half]].map(([dx, dy]) =>
+          [c.x + dx * cos - dy * sin, c.y + dx * sin + dy * cos]
+        );
+        corners.push(corners[0]);
+        return turf.polygon([corners]);
+      });
+
+      // Union all cell polygons into a single polygon for this storey
+      let merged;
+      if (cellFeatures.length === 1) {
+        merged = cellFeatures[0];
+      } else {
+        try {
+          merged = turf.union(turf.featureCollection(cellFeatures));
+        } catch (_) {
+          // If union fails, skip this storey
+          continue;
+        }
+      }
+
+      if (merged) {
+        rawStoreyData.push({
+          buildingIndex: bi,
+          storey: s,
+          polygonLV95: merged.geometry,
+          base: (s - 1) * floorH,
+          top: Math.min(s * floorH, maxH),
+        });
+      }
+    }
+  }
+
+  // Storey polygons source + layer (starts empty, converted lazily)
+  const emptyGeoJSON2 = { type: "FeatureCollection", features: [] };
+  if (map.getSource("storey-polygons")) {
+    map.getSource("storey-polygons").setData(emptyGeoJSON2);
+  } else {
+    map.addSource("storey-polygons", { type: "geojson", data: emptyGeoJSON2 });
+  }
+
+  if (!map.getLayer("storey-polygons-3d")) {
+    map.addLayer({
+      id: "storey-polygons-3d",
+      type: "fill-extrusion",
+      source: "storey-polygons",
+      layout: { visibility: "none" },
+      paint: STOREY_PAINT,
     });
   }
 
@@ -229,6 +458,27 @@ export function plotResults(data) {
   map.on("mouseenter", "buildings-3d", () => { map.getCanvas().style.cursor = "pointer"; });
   map.on("mouseleave", "buildings-3d", () => { map.getCanvas().style.cursor = ""; });
 
+  // Cluster click → zoom to expand
+  map.on("click", "clusters", (e) => {
+    const cluster = e.features[0];
+    map.getSource("buildings-clustered").getClusterExpansionZoom(cluster.properties.cluster_id, (err, zoom) => {
+      if (err) return;
+      map.easeTo({ center: cluster.geometry.coordinates, zoom: zoom + 0.5 });
+    });
+  });
+  map.on("mouseenter", "clusters", () => { map.getCanvas().style.cursor = "pointer"; });
+  map.on("mouseleave", "clusters", () => { map.getCanvas().style.cursor = ""; });
+
+  // Unclustered point click → fly to building
+  map.on("click", "unclustered-point", (e) => {
+    if (!e.features.length) return;
+    const idx = e.features[0].properties._index;
+    map.flyTo({ center: e.lngLat, zoom: 17 });
+    if (callbacks.onBuildingSelect) callbacks.onBuildingSelect(idx);
+  });
+  map.on("mouseenter", "unclustered-point", () => { map.getCanvas().style.cursor = "pointer"; });
+  map.on("mouseleave", "unclustered-point", () => { map.getCanvas().style.cursor = ""; });
+
   // Layer toggles
   document.getElementById("layer-toggle-footprints")?.addEventListener("change", (e) => {
     if (map.getLayer("buildings-outline")) {
@@ -248,9 +498,23 @@ export function plotResults(data) {
       map.setLayoutProperty("grid-cells-3d", "visibility", e.target.checked ? "visible" : "none");
     }
   });
+  document.getElementById("layer-toggle-storeys")?.addEventListener("change", (e) => {
+    if (e.target.checked) {
+      ensureStoreyPolygonsConverted();
+    }
+    if (map.getLayer("storey-polygons-3d")) {
+      map.setLayoutProperty("storey-polygons-3d", "visibility", e.target.checked ? "visible" : "none");
+    }
+  });
   document.getElementById("layer-toggle-labels")?.addEventListener("change", (e) => {
     if (map.getLayer("buildings-labels")) {
       map.setLayoutProperty("buildings-labels", "visibility", e.target.checked ? "visible" : "none");
+    }
+  });
+  document.getElementById("layer-toggle-clusters")?.addEventListener("change", (e) => {
+    const vis = e.target.checked ? "visible" : "none";
+    for (const id of ["clusters", "cluster-count", "unclustered-point"]) {
+      if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", vis);
     }
   });
 
@@ -323,6 +587,7 @@ function initBasemapSwitcher() {
           const visBuildings = document.getElementById("layer-toggle-buildings")?.checked ? "visible" : "none";
           const visLabels = document.getElementById("layer-toggle-labels")?.checked ? "visible" : "none";
           const visGrid = document.getElementById("layer-toggle-grid")?.checked ? "visible" : "none";
+          const visClusters = document.getElementById("layer-toggle-clusters")?.checked !== false;
 
           map.addSource("buildings", { type: "geojson", data: savedData });
           map.addLayer({ id: "buildings-3d", type: "fill-extrusion", source: "buildings",
@@ -335,6 +600,15 @@ function initBasemapSwitcher() {
           map.addSource("grid-cells", { type: "geojson", data: gridData });
           map.addLayer({ id: "grid-cells-3d", type: "fill-extrusion", source: "grid-cells",
             layout: { visibility: visGrid }, paint: GRID_PAINT });
+
+          const visStoreys = document.getElementById("layer-toggle-storeys")?.checked ? "visible" : "none";
+          const storeyData = storeyPolygonsGeoJSON || { type: "FeatureCollection", features: [] };
+          map.addSource("storey-polygons", { type: "geojson", data: storeyData });
+          map.addLayer({ id: "storey-polygons-3d", type: "fill-extrusion", source: "storey-polygons",
+            layout: { visibility: visStoreys }, paint: STOREY_PAINT });
+
+          // Re-add cluster layers
+          addClusterLayers(visClusters);
         }
       });
 
