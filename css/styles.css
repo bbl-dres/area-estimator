@@ -528,7 +528,7 @@ main { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: 
 
 /* -- Map panel -- */
 .map-panel { flex: 1; position: relative; min-height: 250px; }
-#results-map { width: 100%; height: 100%; }
+#results-map { width: 100%; height: 100%; position: relative; z-index: 0; }
 
 /* Map controls styling */
 .map-3d-btn { font-weight: 700 !important; font-size: 13px !important; letter-spacing: -0.02em; }
@@ -1153,8 +1153,8 @@ main { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: 
 
   /* MapLibre navigation control — larger touch targets on mobile */
   .maplibregl-ctrl-top-right {
-    top: var(--space-2);
-    right: var(--space-2);
+    top: var(--space-3);
+    right: var(--space-3);
   }
   .maplibregl-ctrl-group button {
     width: 40px !important;
@@ -1165,10 +1165,10 @@ main { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: 
     height: 40px !important;
   }
 
-  /* Camera controls — visible on mobile */
+  /* Camera controls — visible on mobile, above basemap switcher */
   .camera-controls {
     display: flex;
-    bottom: 90px;
+    bottom: 150px;
   }
 
   /* Accordion menu — compact */
