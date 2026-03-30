@@ -13,7 +13,8 @@ select:focus-visible { outline: 2px solid var(--federal-blue); outline-offset: 1
 a { transition: color var(--transition-fast); }
 
 /* -- Layout -- */
-.app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+.app { display: flex; flex-direction: column; height: 100dvh; height: 100vh; overflow: hidden; }
+@supports (height: 100dvh) { .app { height: 100dvh; } }
 
 /* -- Header -- */
 #header {
