@@ -839,60 +839,10 @@ main { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: 
   z-index: var(--z-accordion);
 }
 
-/* -- Camera control buttons (3D rotation/pitch) -- */
-.camera-controls {
-  position: absolute;
-  bottom: 80px;
-  right: var(--space-3);
-  z-index: var(--z-accordion);
-  display: none;
-  flex-direction: column;
-  gap: var(--space-2);
-  pointer-events: auto;
-}
-
-.camera-btn {
-  width: 44px;
-  height: 44px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: var(--color-white);
-  color: var(--gray-700);
-  box-shadow: var(--shadow-md);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+/* -- Pitch buttons appended to MapLibre nav control -- */
+.cam-pitch-icon {
   font-size: 20px;
-  transition: background var(--duration-fast), color var(--duration-fast);
-  -webkit-tap-highlight-color: transparent;
-}
-
-.camera-btn:hover, .camera-btn:active {
-  background: var(--gray-100);
-  color: var(--gray-900);
-}
-
-.camera-btn .material-symbols-outlined {
-  font-size: 22px;
-}
-
-.camera-btn-group {
-  display: flex;
-  flex-direction: column;
-  background: var(--color-white);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-md);
-  overflow: hidden;
-}
-
-.camera-btn-group .camera-btn {
-  box-shadow: none;
-  border-radius: 0;
-}
-
-.camera-btn-group .camera-btn + .camera-btn {
-  border-top: 1px solid var(--gray-200);
+  line-height: 1;
 }
 
 /* -- Map popup -- */
@@ -1166,29 +1116,12 @@ main { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: 
     height: 40px !important;
   }
 
-  /* Camera controls — visible on mobile, above basemap switcher */
-  .camera-controls {
-    display: flex;
-    bottom: 150px;
-  }
-
-  /* Accordion menu — compact */
+  /* Accordion menu — compact, no toggle on mobile */
   #accordion-panel { width: 240px; }
-  #menu-toggle { font-size: var(--text-xs); padding: var(--space-2) var(--space-3); }
-  #menu-toggle-text { display: none; }
+  #menu-toggle { display: none; }
   .accordion-header { padding: var(--space-2) var(--space-3); }
   .accordion-content { padding: var(--space-2) var(--space-3); }
   .active-layer-item { padding: var(--space-2); min-height: var(--touch-target-min); }
-
-  /* Accordion toggle — prominent when panel is collapsed */
-  #accordion-panel.collapsed + #menu-toggle {
-    background: var(--federal-blue, #1a365d);
-    padding: var(--space-2) var(--space-3);
-    border-radius: var(--radius-sm);
-    min-width: var(--touch-target-min);
-    min-height: var(--touch-target-min);
-    box-shadow: var(--shadow-lg);
-  }
 
   /* Style switcher — vertical, above basemap btn */
   .style-switcher { bottom: 40px; right: var(--space-3); }
