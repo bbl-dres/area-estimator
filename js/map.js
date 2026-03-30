@@ -630,16 +630,28 @@ function initBasemapSwitcher() {
 }
 
 // =============================================
-// Camera controls (mobile 3D rotation/pitch)
+// Camera controls — append pitch buttons to MapLibre NavigationControl
 // =============================================
 function initCameraControls() {
   const PITCH_STEP = 10;
-  const BEARING_STEP = 15;
+  const navGroup = document.querySelector(".maplibregl-ctrl-top-right .maplibregl-ctrl-group");
+  if (!navGroup) return;
 
-  const bind = (id, fn) => {
-    const btn = document.getElementById(id);
-    if (!btn) return;
-    // Support both tap and long-press (repeat while held)
+  const makeBtn = (label, iconText) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.title = label;
+    btn.setAttribute("aria-label", label);
+    btn.innerHTML = `<span class="material-symbols-outlined cam-pitch-icon">${iconText}</span>`;
+    return btn;
+  };
+
+  const pitchUp = makeBtn("Neigung erhöhen", "keyboard_arrow_up");
+  const pitchDown = makeBtn("Neigung verringern", "keyboard_arrow_down");
+  navGroup.appendChild(pitchUp);
+  navGroup.appendChild(pitchDown);
+
+  const bindRepeat = (btn, fn) => {
     let interval;
     const start = (e) => { e.preventDefault(); fn(); interval = setInterval(fn, 150); };
     const stop = () => clearInterval(interval);
@@ -649,27 +661,12 @@ function initCameraControls() {
     btn.addEventListener("pointercancel", stop);
   };
 
-  bind("cam-pitch-up", () => {
-    const pitch = Math.min(map.getPitch() + PITCH_STEP, 85);
-    map.easeTo({ pitch, duration: 100 });
+  bindRepeat(pitchUp, () => {
+    map.easeTo({ pitch: Math.min(map.getPitch() + PITCH_STEP, 85), duration: 100 });
   });
-  bind("cam-pitch-down", () => {
-    const pitch = Math.max(map.getPitch() - PITCH_STEP, 0);
-    map.easeTo({ pitch, duration: 100 });
+  bindRepeat(pitchDown, () => {
+    map.easeTo({ pitch: Math.max(map.getPitch() - PITCH_STEP, 0), duration: 100 });
   });
-  bind("cam-rotate-left", () => {
-    map.easeTo({ bearing: map.getBearing() - BEARING_STEP, duration: 100 });
-  });
-  bind("cam-rotate-right", () => {
-    map.easeTo({ bearing: map.getBearing() + BEARING_STEP, duration: 100 });
-  });
-
-  const resetBtn = document.getElementById("cam-reset");
-  if (resetBtn) {
-    resetBtn.addEventListener("click", () => {
-      map.easeTo({ pitch: 0, bearing: 0, duration: 400 });
-    });
-  }
 }
 
 // =============================================
@@ -679,6 +676,16 @@ function initAccordion() {
   const panel = document.getElementById("accordion-panel");
   const toggle = document.getElementById("menu-toggle");
   if (!panel || !toggle) return;
+
+  // On mobile, collapse the accordion content by default for a cleaner UI
+  const isMobile = window.innerWidth <= 767;
+  if (isMobile) {
+    panel.querySelectorAll(".accordion-header").forEach((h) => {
+      h.classList.remove("active");
+      h.setAttribute("aria-expanded", "false");
+      h.nextElementSibling?.classList.remove("show");
+    });
+  }
 
   toggle.addEventListener("click", () => {
     const collapsed = panel.classList.toggle("collapsed");
