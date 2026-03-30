@@ -142,6 +142,9 @@ export async function initMap(containerId, cbs) {
   // Accordion menu
   initAccordion();
 
+  // Camera controls (mobile pitch/rotate)
+  initCameraControls();
+
   // Footer coordinates
   map.on("mousemove", (e) => {
     const el = document.getElementById("footer-coords");
@@ -624,6 +627,49 @@ function initBasemapSwitcher() {
   document.addEventListener("click", (e) => {
     if (!e.target.closest(".style-switcher")) panel.classList.remove("show");
   });
+}
+
+// =============================================
+// Camera controls (mobile 3D rotation/pitch)
+// =============================================
+function initCameraControls() {
+  const PITCH_STEP = 10;
+  const BEARING_STEP = 15;
+
+  const bind = (id, fn) => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    // Support both tap and long-press (repeat while held)
+    let interval;
+    const start = (e) => { e.preventDefault(); fn(); interval = setInterval(fn, 150); };
+    const stop = () => clearInterval(interval);
+    btn.addEventListener("pointerdown", start);
+    btn.addEventListener("pointerup", stop);
+    btn.addEventListener("pointerleave", stop);
+    btn.addEventListener("pointercancel", stop);
+  };
+
+  bind("cam-pitch-up", () => {
+    const pitch = Math.min(map.getPitch() + PITCH_STEP, 85);
+    map.easeTo({ pitch, duration: 100 });
+  });
+  bind("cam-pitch-down", () => {
+    const pitch = Math.max(map.getPitch() - PITCH_STEP, 0);
+    map.easeTo({ pitch, duration: 100 });
+  });
+  bind("cam-rotate-left", () => {
+    map.easeTo({ bearing: map.getBearing() - BEARING_STEP, duration: 100 });
+  });
+  bind("cam-rotate-right", () => {
+    map.easeTo({ bearing: map.getBearing() + BEARING_STEP, duration: 100 });
+  });
+
+  const resetBtn = document.getElementById("cam-reset");
+  if (resetBtn) {
+    resetBtn.addEventListener("click", () => {
+      map.easeTo({ pitch: 0, bearing: 0, duration: 400 });
+    });
+  }
 }
 
 // =============================================
