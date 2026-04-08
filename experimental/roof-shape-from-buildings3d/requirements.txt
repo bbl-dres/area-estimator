@@ -1,0 +1,12 @@
+# Roof Shape from swissBUILDINGS3D — dependencies
+# Install with: pip install -r requirements.txt
+
+# GDB file reading (needs GDAL — Python 3.11 has the easiest pre-built wheels)
+fiona>=1.9.0
+
+# 3D mesh processing and analysis
+trimesh>=4.0.0
+numpy>=1.24.0
+
+# Data handling and CSV output
+pandas>=2.0.0

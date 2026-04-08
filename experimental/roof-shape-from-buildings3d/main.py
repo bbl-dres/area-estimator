@@ -28,24 +28,9 @@ warnings.filterwarnings('ignore')
 
 # Import roof analysis module
 from roof_analysis import analyze_building_roof
-from green_roof import GreenRoofAnalyzer
-import shapely.geometry
 
 # Processing configuration
 CHUNK_SIZE = 100000  # Process and save every 100,000 buildings
-
-# Global analyzer instance for workers
-green_roof_analyzer = None
-
-def worker_init(rs_dir):
-    """Initialize the global analyzer in worker processes."""
-    global green_roof_analyzer
-    if rs_dir:
-        try:
-            green_roof_analyzer = GreenRoofAnalyzer(rs_dir)
-            logging.info(f"Initialized GreenRoofAnalyzer with {rs_dir}")
-        except Exception as e:
-            logging.error(f"Failed to initialize GreenRoofAnalyzer: {e}")
 
 
 def setup_logging(output_dir):
@@ -284,36 +269,6 @@ def process_single_building(row_data):
         roof_results = analyze_building_roof(vertices, faces)
         result.update(roof_results)
 
-        # Perform green roof analysis if available
-        if green_roof_analyzer:
-            # We need a 2D footprint. 
-            # 1. Try to use the original geometry from the row if available and if it's a Polygon/MultiPolygon
-            # The 'geometry' in row is a fiona geometry dict (GeoJSON-like).
-            # But wait! read_gdb_buildings_chunked yields 'properties' dict, and we added '_vertices' etc.
-            # We DID NOT keep the original geometry object in the properties dict to save memory?
-            # Let's check read_gdb_buildings_chunked.
-            # It does: properties = dict(feature['properties'])
-            # It uses geometry to parse vertices but DOES NOT store the geometry dict in properties.
-            # We need to reconstruct the footprint from vertices.
-            
-            # Simple footprint: convex hull of xy coordinates?
-            # Or assume the 'footprint_area' calculation in roof_analysis knows the footprint?
-            # roof_analysis calculates footprint area but doesn't return the polygon.
-            
-            # Let's reconstruct a simple 2D polygon from vertices (ignoring Z)
-            # This is an approximation. Ideally we'd pass the original geometry.
-            # But the 'vertices' list is just points. We don't know the winding/connectivity for the footprint 
-            # unless we project all faces to 2D and union them? That's expensive.
-            
-            # Better approach: Modify read_gdb_buildings_chunked to optionally store the validation 2D footprint.
-            # For now, let's use the vertices projected to 2D and take the convex hull.
-            # It's fast and reasonable for single buildings, though it might overestimate L-shapes.
-            points_2d = [(v[0], v[1]) for v in vertices]
-            if len(points_2d) >= 3:
-                footprint_geom = shapely.geometry.MultiPoint(points_2d).convex_hull
-                green_results = green_roof_analyzer.calculate_green_area(footprint_geom)
-                result.update(green_results)
-
     except Exception as e:
         result['analysis_status'] = 'failed'
         result['analysis_error'] = str(e)
@@ -326,7 +281,7 @@ def process_single_building(row_data):
     return idx, result
 
 
-def process_chunk_parallel(chunk_data, chunk_num, num_workers=None, rs_dir=None):
+def process_chunk_parallel(chunk_data, chunk_num, num_workers=None):
     """
     Process a chunk of buildings in parallel using ProcessPoolExecutor.
 
@@ -334,7 +289,6 @@ def process_chunk_parallel(chunk_data, chunk_num, num_workers=None, rs_dir=None)
         chunk_data: List of building dicts
         chunk_num: Chunk number for logging
         num_workers: Number of parallel workers (default: CPU count - 1, max 8)
-        rs_dir: Directory containing RS imagery for green roof analysis (optional)
 
     Returns:
         dict: Results indexed by building index
@@ -354,7 +308,7 @@ def process_chunk_parallel(chunk_data, chunk_num, num_workers=None, rs_dir=None)
     # Prepare data for parallel processing
     row_data = [(idx, row) for idx, row in enumerate(chunk_data)]
 
-    with ProcessPoolExecutor(max_workers=num_workers, initializer=worker_init, initargs=(rs_dir,)) as executor:
+    with ProcessPoolExecutor(max_workers=num_workers) as executor:
         # Submit all tasks
         future_to_idx = {
             executor.submit(process_single_building, data): data[0]
@@ -528,17 +482,12 @@ Examples:
                         help='List available layers in GDB and exit')
     parser.add_argument('--keep-chunks', action='store_true',
                         help='Keep individual chunk CSV files after merging')
-    parser.add_argument('--rs-dir',
-                        help='Directory containing SwissIMAGE RS GeoTIFFs for green roof estimation')
-    parser.add_argument('--no-filter', action='store_true',
-                        help='Do not filter buildings by RS coverage (process all)')
 
     args = parser.parse_args()
 
     # Setup paths
     input_path = Path(args.input_gdb)
     output_dir = Path(args.output_dir)
-    rs_dir = Path(args.rs_dir) if args.rs_dir else None
 
     # Handle --list-layers option
     if args.list_layers:
@@ -571,13 +520,6 @@ Examples:
     logger.info(f"Chunk size: {args.chunk_size}")
     if args.limit:
         logger.info(f"Limit: {args.limit} buildings")
-    if rs_dir:
-        logger.info(f"Green Roof Analysis: Enabled (RS data: {rs_dir})")
-    
-    # Pre-check RS dir if enabled
-    if rs_dir and not rs_dir.exists():
-        logger.error(f"RS directory not found: {rs_dir}")
-        return 1
 
     start_time = time.time()
 
@@ -586,34 +528,16 @@ Examples:
         chunk_summaries = []
         output_path = output_dir / f'roof_analysis_{time.strftime("%Y%m%d_%H%M%S")}'
 
-        # Determine bounds for filtering if requested
-        filter_bbox = None
-        if rs_dir and not args.no_filter:
-            try:
-                # Initialize analyzer here temporarily to get bounds (lazy init in workers later)
-                # Or just use the one we'll pass to workers? 
-                # Since we need bounds BEFORE reading, we must create an instance or helper here.
-                # Just create one.
-                logging.info("Scanning RS directory for spatial bounds...")
-                analyzer_for_bounds = GreenRoofAnalyzer(str(rs_dir))
-                filter_bbox = analyzer_for_bounds.get_coverage_bounds()
-                if filter_bbox:
-                    logging.info(f"Filtering buildings within RS bounds: {filter_bbox}")
-                else:
-                    logging.warning("Could not determine RS bounds. Processing all buildings.")
-            except Exception as e:
-                logging.warning(f"Error determining RS bounds: {e}. Processing all buildings.")
-
         # Process each chunk
         for chunk_num, chunk_data in read_gdb_buildings_chunked(
-            str(input_path), args.layer, args.chunk_size, args.limit, bbox=filter_bbox
+            str(input_path), args.layer, args.chunk_size, args.limit
         ):
             logger.info(f"\n{'='*40}")
             logger.info(f"Processing chunk {chunk_num}")
             logger.info(f"{'='*40}")
 
             # Process chunk in parallel
-            results = process_chunk_parallel(chunk_data, chunk_num, args.workers, str(rs_dir) if rs_dir else None)
+            results = process_chunk_parallel(chunk_data, chunk_num, args.workers)
 
             # Save chunk results
             summary = save_chunk_results(results, output_path, chunk_num)

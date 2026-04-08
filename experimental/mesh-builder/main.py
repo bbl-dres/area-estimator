@@ -72,7 +72,7 @@ Usage
 -----
 ::
 
-    python build_mesh.py input.csv \\
+    python main.py input.csv \\
         --av AV_data.gpkg \\
         --dsm-dir D:/swissSURFACE3D \\
         --dtm-dir D:/swissALTI3D \\
@@ -103,8 +103,8 @@ from shapely.geometry.polygon import orient
 
 # Import sibling modules from the parent project's python/ folder.
 # Layout:
-#   <repo>/python/                                    ← target
-#   <repo>/experimental/mesh-builder/build_mesh.py    ← this file
+#   <repo>/python/                              ← target
+#   <repo>/experimental/mesh-builder/main.py    ← this file
 # So the project root is two levels up, and python/ is its sibling.
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / "python"))

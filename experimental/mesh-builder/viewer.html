@@ -73,7 +73,7 @@
 
 <div id="panel">
   <h1>Mesh Viewer</h1>
-  <div class="hint">For inspecting <code>build_mesh.py</code> output. Loads OBJ / PLY / STL / glTF.</div>
+  <div class="hint">For inspecting <code>main.py</code> output. Loads OBJ / PLY / STL / glTF.</div>
 
   <input type="file" id="file-input" accept=".obj,.ply,.stl,.glb,.gltf" style="display:none">
   <button id="pick-btn">Open file…</button>
@@ -95,6 +95,8 @@
     <div><span>roof area</span><span id="stat-roof">—</span></div>
     <div><span>wall area</span><span id="stat-wall">—</span></div>
     <div><span>floor area</span><span id="stat-floor">—</span></div>
+    <div><span>roof type</span><span id="stat-roof-type">—</span></div>
+    <div><span>roof pitch</span><span id="stat-roof-pitch">—</span></div>
   </div>
 </div>
 
@@ -398,6 +400,29 @@ function updateStats(renderGeom, watertightGeom, filename) {
   document.getElementById("stat-roof").textContent  = fmtArea(stats.roofArea);
   document.getElementById("stat-wall").textContent  = fmtArea(stats.wallArea);
   document.getElementById("stat-floor").textContent = fmtArea(stats.floorArea);
+
+  // Roof shape — heuristic classification from face normals.
+  const roofTypeEl  = document.getElementById("stat-roof-type");
+  const roofPitchEl = document.getElementById("stat-roof-pitch");
+  const shape = classifyRoofShape(watertightGeom);
+  if (!shape) {
+    roofTypeEl.textContent = "—";
+    roofPitchEl.textContent = "—";
+    roofTypeEl.className = "";
+  } else {
+    // Append a small confidence indicator (★ high, ◐ medium, ○ low)
+    const conf = shape.confidence;
+    const mark = conf > 0.8 ? "★" : conf > 0.5 ? "◐" : "○";
+    roofTypeEl.textContent = `${shape.type} ${mark}`;
+    roofTypeEl.className = conf > 0.5 ? "ok" : "warn";
+    roofPitchEl.textContent = shape.type === "flat" ? "—" : `${shape.pitch}°`;
+    // Log the underlying breakdown so we can debug edge cases without
+    // polluting the panel. Drop into the browser console.
+    console.log(
+      `[roof] type=${shape.type} pitch=${shape.pitch}° peaks=${shape.peaks} ` +
+      `flatFraction=${shape.flatFraction.toFixed(2)} confidence=${conf.toFixed(2)}`
+    );
+  }
 }
 
 function computeMeshStats(geometry) {
@@ -448,6 +473,181 @@ function computeMeshStats(geometry) {
     volume: Math.abs(signedVolume),
     roofArea, wallArea, floorArea,
   };
+}
+
+// ── Roof shape classification ───────────────────────────────────────────────
+//
+// Heuristic classifier — see RESEARCH.md §3 ("Roof shape classification").
+// Cheap (one pass over the indexed faces, ~1 ms even for 30k faces) and works
+// on the existing mesh without any new dependencies.
+//
+// Algorithm:
+//   1. For each face classified as "roof" by the surface-coloring rule
+//      (`nz > SURFACE_THRESHOLD`), compute pitch (angle from horizontal) and
+//      azimuth (compass direction the slope faces).
+//   2. Build an *area-weighted* azimuth histogram in 10° bins. Area weighting
+//      is critical because a noisy roof has hundreds of small wrong-normal
+//      faces that would swamp a count-based histogram.
+//   3. Find peaks in the histogram (bins above 5% of total pitched area, and
+//      higher than both neighbours).
+//   4. Decision tree on (flat fraction, peak count, peak relationships,
+//      mean pitch).
+//
+// Limitations: multi-wing buildings (e.g. EGID 2241912 with three different
+// roof heights) currently fall through to "complex" because the classifier
+// runs on the whole mesh at once. Per-wing classification needs a height
+// clustering step first — see RESEARCH.md §12 "things we haven't tried".
+
+const PITCH_FLAT_DEG = 8;            // pitch below this counts as flat — 8° is generous enough to absorb DSM noise on real flat roofs
+const FLAT_DOMINATES_FRAC = 0.50;    // ≥ this fraction flat → "flat" verdict (rather than hunting for pitched-roof patterns in edge effects)
+const PEAK_AREA_THRESHOLD = 0.05;    // peak must be ≥ 5% of pitched area
+const OPPOSITE_PEAK_TOL_DEG = 30;    // gable: peaks within ±30° of 180° apart
+const HIP_QUADRANT_MIN = 3;          // hip needs at least 3 distinct 90° quadrants
+
+function classifyRoofShape(geometry) {
+  if (!geometry.index) return null;
+
+  const pos = geometry.attributes.position.array;
+  const idx = geometry.index.array;
+
+  // 36 bins of 10° each, indexed by floor((azimuth_deg + 180) / 10)
+  const azimuthBins = new Array(36).fill(0);
+  let flatArea = 0;
+  let pitchedArea = 0;
+  let pitchSum = 0;            // pitch × area, for area-weighted mean
+
+  for (let i = 0; i < idx.length; i += 3) {
+    const a = idx[i] * 3, b = idx[i + 1] * 3, c = idx[i + 2] * 3;
+
+    const x0 = pos[a],     y0 = pos[a + 1], z0 = pos[a + 2];
+    const x1 = pos[b],     y1 = pos[b + 1], z1 = pos[b + 2];
+    const x2 = pos[c],     y2 = pos[c + 1], z2 = pos[c + 2];
+
+    const ex = x1 - x0, ey = y1 - y0, ez = z1 - z0;
+    const fx = x2 - x0, fy = y2 - y0, fz = z2 - z0;
+    const cx = ey * fz - ez * fy;
+    const cy = ez * fx - ex * fz;
+    const cz = ex * fy - ey * fx;
+    const len = Math.hypot(cx, cy, cz);
+    if (len === 0) continue;
+
+    const nz = cz / len;
+    if (nz <= SURFACE_THRESHOLD) continue;   // walls, floor, stalactites — skip
+
+    const area = len * 0.5;
+
+    // Pitch: angle from horizontal (0 = flat roof, 90 = vertical wall).
+    // Clamp nz to [-1, 1] to dodge tiny FP overshoots that would NaN acos.
+    const pitchDeg = Math.acos(Math.max(-1, Math.min(1, nz))) * 180 / Math.PI;
+
+    if (pitchDeg < PITCH_FLAT_DEG) {
+      flatArea += area;
+      // Nearly-flat faces have meaningless azimuth (the horizontal normal
+      // component is dominated by FP noise) — exclude from the histogram.
+    } else {
+      pitchedArea += area;
+      pitchSum += pitchDeg * area;
+
+      // Azimuth: compass direction the slope faces. atan2 returns -180..180.
+      const azimuthDeg = Math.atan2(cy, cx) * 180 / Math.PI;
+      const bin = Math.floor((azimuthDeg + 180) / 10) % 36;
+      azimuthBins[bin] += area;
+    }
+  }
+
+  const totalRoofArea = flatArea + pitchedArea;
+  if (totalRoofArea === 0) return null;
+
+  const flatFraction = flatArea / totalRoofArea;
+  const meanPitch = pitchedArea > 0 ? pitchSum / pitchedArea : 0;
+
+  // ── Decision tree ─────────────────────────────────────────────────────
+  if (flatFraction >= FLAT_DOMINATES_FRAC) {
+    return {
+      type: "flat",
+      pitch: 0,
+      peaks: 0,
+      flatFraction,
+      confidence: flatFraction,
+    };
+  }
+
+  // Find peaks: bins with area above the threshold AND ≥ both neighbours.
+  // We rebuild a single-modal "peak" representation by merging adjacent
+  // above-threshold bins, then taking the strongest bin in each contiguous
+  // run as the peak. This handles the common case where a slope's normal
+  // direction lands across two adjacent bins.
+  const peakThreshold = pitchedArea * PEAK_AREA_THRESHOLD;
+  const peaks = [];
+  let i = 0;
+  while (i < 36) {
+    if (azimuthBins[i] < peakThreshold) { i++; continue; }
+    // Walk a contiguous above-threshold run (with wraparound)
+    let j = i, bestBin = i, bestArea = azimuthBins[i];
+    let walked = 0;
+    while (azimuthBins[j % 36] >= peakThreshold && walked < 36) {
+      if (azimuthBins[j % 36] > bestArea) {
+        bestArea = azimuthBins[j % 36];
+        bestBin = j % 36;
+      }
+      j++;
+      walked++;
+    }
+    peaks.push({ bin: bestBin, area: bestArea, azimuth: bestBin * 10 - 180 + 5 });
+    i = j;
+  }
+
+  // Sort peaks descending by area, take top 6 (more than that is "complex"
+  // by definition for our taxonomy).
+  peaks.sort((a, b) => b.area - a.area);
+  const topPeaks = peaks.slice(0, 6);
+
+  let type;
+  if (topPeaks.length === 0) {
+    type = "complex";  // pitched but no clear directions
+  } else if (topPeaks.length === 1) {
+    type = "shed";
+  } else if (topPeaks.length === 2 && areOppositePeaks(topPeaks[0], topPeaks[1])) {
+    type = "gable";
+  } else if (topPeaks.length >= 4 && hasFourQuadrantPeaks(topPeaks.slice(0, 4))) {
+    type = "hip";
+  } else {
+    type = "complex";
+  }
+
+  // Confidence heuristic: how much of the pitched area is concentrated in
+  // the top peaks of the matched type. High concentration = high confidence.
+  const expectedPeaks = type === "shed" ? 1 : type === "gable" ? 2 : type === "hip" ? 4 : topPeaks.length;
+  const concentratedArea = topPeaks.slice(0, expectedPeaks).reduce((s, p) => s + p.area, 0);
+  const confidence = pitchedArea > 0 ? concentratedArea / pitchedArea : 0;
+
+  return {
+    type,
+    pitch: Math.round(meanPitch),
+    peaks: topPeaks.length,
+    flatFraction,
+    confidence,
+  };
+}
+
+function areOppositePeaks(p1, p2) {
+  // Two peaks are "opposing" if their azimuths differ by ~180° (within tol).
+  // Wraparound aware.
+  const diff = Math.abs(p1.azimuth - p2.azimuth);
+  const wrapped = Math.min(diff, 360 - diff);
+  return Math.abs(wrapped - 180) < OPPOSITE_PEAK_TOL_DEG;
+}
+
+function hasFourQuadrantPeaks(peaks) {
+  // Hip detection: the four strongest peaks should span at least 3 of 4
+  // 90° quadrants. We allow some slop (3 instead of 4) so a slightly
+  // asymmetric hip with one weak side still classifies correctly.
+  if (peaks.length < 4) return false;
+  const quadrants = new Set();
+  for (const p of peaks) {
+    quadrants.add(Math.floor((p.azimuth + 180) / 90) % 4);
+  }
+  return quadrants.size >= HIP_QUADRANT_MIN;
 }
 
 function checkClosedManifold(geometry) {
@@ -508,7 +708,7 @@ function loadFile(file) {
 
 function firstMeshGeometry(group) {
   // Walk a Group/Scene and return the first child mesh's geometry.
-  // build_mesh.py emits single-mesh OBJs so this is sufficient; if you ever
+  // The mesh-builder main.py emits single-mesh OBJs so this is sufficient; if you ever
   // load a multi-mesh file, only the first part will appear (and you'll see
   // a low face count in the stats panel as the tell).
   let found = null;

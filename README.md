@@ -201,8 +201,9 @@ area-estimator/
 │   └── requirements.txt
 ├── experimental/                  ← Standalone exploration tools (not in main pipeline)
 │   ├── mesh-builder/                 Watertight 3D building hulls + viewer ★
-│   ├── roof-estimator/               Roof shape analysis from 3D meshes
-│   └── floor-level-estimator.py      Earlier per-floor estimator with gbaup factor
+│   ├── roof-shape-from-buildings3d/  Roof shape from swissBUILDINGS3D 3D meshes
+│   ├── green-roof-from-rs/           Green roof coverage via NDVI on swissIMAGE-RS
+│   └── floor-level-estimator/        Earlier per-floor estimator with gbaup factor
 ├── fme/                           ← FME workbenches — see fme/README.md
 │   ├── README.md                     Volume Estimator pipeline summary
 │   ├── Volume Estimator FME.fmw      The main workbench (Steps 1–3)
@@ -244,7 +245,7 @@ pip install -r python/requirements.txt
 pip install -r experimental/mesh-builder/requirements.txt
 
 cd experimental/mesh-builder
-python build_mesh.py ../../data/example.csv \
+python main.py ../../data/example.csv \
     --av <path-to-AV.gpkg> \
     --dsm-dir <swissSURFACE3D-dir> \
     --dtm-dir <swissALTI3D-dir> \
@@ -259,8 +260,9 @@ See [experimental/mesh-builder/README.md](experimental/mesh-builder/README.md) f
 
 | Tool | Status | What it does |
 |---|---|---|
-| [experimental/roof-estimator/](experimental/roof-estimator/) | unmaintained | Roof characteristics from swissBUILDINGS3D 3D meshes |
-| [experimental/floor-level-estimator.py](experimental/floor-level-estimator.py) | unmaintained | Earlier per-floor estimator (gbaup-based) |
+| [experimental/roof-shape-from-buildings3d/](experimental/roof-shape-from-buildings3d/) | working | Per-building roof characteristics (area, slope, shape, height) by analysing swissBUILDINGS3D 3D mesh geometry. CSV output, parallelised, processes 100k+ buildings |
+| [experimental/green-roof-from-rs/](experimental/green-roof-from-rs/) | working | Per-building green roof coverage via NDVI on swissIMAGE-RS multispectral imagery (4-band, 0.25 m). Reads any footprint source (GPKG/SHP/GDB/GeoJSON), outputs CSV with `green_roof_area_m2`, `green_roof_percentage`, `ndvi_mean`, `ndvi_max` |
+| [experimental/floor-level-estimator/](experimental/floor-level-estimator/) | unmaintained | Earlier per-floor estimator (gbaup-based) |
 
 ---
 

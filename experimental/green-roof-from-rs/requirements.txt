@@ -1,0 +1,18 @@
+# Green Roof Estimator from swissIMAGE-RS — dependencies
+# Install with: pip install -r requirements.txt
+
+# Multispectral raster processing (NDVI computation, mask-by-polygon clipping)
+rasterio>=1.3.0
+
+# Geometry handling and spatial indexing of raster tiles
+shapely>=2.0.0
+
+# Reading building footprints from GeoPackage / Shapefile / GDB
+fiona>=1.9.0
+
+# Numerical work
+numpy>=1.24.0
+
+# Used by find_buildings_in_area.py for reading TIFF metadata directly
+# (rasterio handles this too — pillow is here only for the standalone helper)
+pillow>=10.0.0
