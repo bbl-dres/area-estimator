@@ -25,8 +25,8 @@
   <script src="https://unpkg.com/@turf/turf@7/turf.min.js" crossorigin="anonymous"></script>
 
   <!-- App CSS -->
-  <link rel="stylesheet" href="css/tokens.css">
-  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="webapp/css/tokens.css">
+  <link rel="stylesheet" href="webapp/css/styles.css">
 </head>
 <body>
 
@@ -109,7 +109,7 @@
             <p class="drop-zone-hint">Erforderlich: id, lon, lat (oder id, egid) &middot; Max. 5'000 Zeilen</p>
           </div>
           <input type="file" id="file-input" accept=".csv,.xlsx,.xls,.tsv,.txt" hidden aria-label="Datei auswahlen">
-          <p class="demo-link"><a href="../data/example.csv" download="vorlage-gebaeude.csv">Vorlage herunterladen (CSV)</a></p>
+          <p class="demo-link"><a href="data/example.csv" download="vorlage-gebaeude.csv">Vorlage herunterladen (CSV)</a></p>
           <p class="demo-link"><span>Oder testen Sie mit </span><a href="#" id="load-demo">Beispieldaten</a></p>
 
           <div id="upload-error" class="upload-error" role="alert" hidden></div>
@@ -283,7 +283,7 @@
 </div>
 
 <!-- App JS (ES modules) -->
-<script type="module" src="js/main.js"></script>
+<script type="module" src="webapp/js/main.js"></script>
 
 </body>
 </html>

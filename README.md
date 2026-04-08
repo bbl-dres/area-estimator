@@ -13,7 +13,7 @@ Estimates building volumes and gross floor areas using publicly available Swiss 
 
 The solution is available in three variants:
 
-- **[Web App](https://bbl-dres.github.io/area-estimator/)** — Zero-install browser app in [`webapp/`](webapp/). Upload a CSV with building EGIDs, get volumes and floor areas on a map with export to CSV/Excel/GeoJSON.
+- **[Web App](https://bbl-dres.github.io/area-estimator/)** — Zero-install browser app. Entry point is [`index.html`](index.html) at the project root (so GitHub Pages picks it up natively); CSS and JS modules live in [`webapp/`](webapp/). Upload a CSV with building EGIDs, get volumes and floor areas on a map with export to CSV/Excel/GeoJSON.
 - **[Python CLI](python/)** — Open-source, requires Python 3.10+ and free dependencies. Processes locally with exact LV95 areas and local elevation tiles. **See [python/README.md](python/README.md) for full CLI reference, output schema, and developer details.**
 - **[FME](fme/)** — Workbench implementing Steps 1–3, requires a licensed copy of [FME Form](https://fme.safe.com/fme-form/). **See [fme/README.md](fme/README.md) for the transformer pipeline.**
 
@@ -63,17 +63,17 @@ The browser-based version runs entirely client-side — no backend, no installat
 
 ### Quick Start
 
-Open `webapp/index.html` in a browser (requires a local server for ES modules):
+Open `index.html` in a browser (requires a local server for ES modules):
 
 ```bash
 cd area-estimator
 python -m http.server 8080
-# Open http://localhost:8080/webapp/
+# Open http://localhost:8080
 ```
 
-Or deploy to any static hosting (GitHub Pages, Cloudflare Pages, etc.). For GitHub Pages, point the source at the `webapp/` subfolder of your branch — see [GitHub's docs on publishing from a folder](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site#publishing-from-a-branch).
+Or deploy to any static hosting (GitHub Pages, Cloudflare Pages, etc.). GitHub Pages serves the root `index.html` directly with no special configuration — the asset references inside `index.html` point at `webapp/css/`, `webapp/js/`, and `data/example.csv`, all of which are siblings of `index.html` in the served tree.
 
-> The web app reads `../data/example.csv` for the demo dataset, so the `data/` directory must remain at the project root (one level above `webapp/`) for the demo button to work.
+> Why this layout? GitHub Pages' "Deploy from a branch" mode only accepts the branch root or a `/docs` folder as the publishing source — arbitrary subfolders like `webapp/` aren't supported. Keeping a thin `index.html` at the root means GitHub Pages works out of the box, while the technical assets (CSS, JS) stay in `webapp/` to keep the repo root clean.
 
 ### APIs Used
 
@@ -186,8 +186,8 @@ The pipeline uses AV polygons for the footprint geometry (needed by Steps 1–3 
 ```
 area-estimator/
 ├── README.md                      ← You are here (overview, web app, limitations)
-├── webapp/                        ← Browser app — served by GitHub Pages
-│   ├── index.html                    Entry point
+├── index.html                     ← Web app entry point (served by GitHub Pages)
+├── webapp/                        ← Web app technical assets
 │   ├── css/                          Stylesheets (tokens.css, styles.css)
 │   └── js/                           Modules (main.js, processor.js, …)
 ├── python/                        ← Python CLI — see python/README.md

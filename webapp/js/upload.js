@@ -37,7 +37,7 @@ export function initUpload(callback) {
 
 async function loadDemoFile() {
   try {
-    const response = await fetch("../data/example.csv");
+    const response = await fetch("data/example.csv");
     if (!response.ok) throw new Error("Could not load demo file");
     const text = await response.text();
     const blob = new Blob([text], { type: "text/csv" });
