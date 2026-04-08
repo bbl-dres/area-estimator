@@ -1,0 +1,9 @@
+{
+  "lv95_offset_m": [
+    2599958.4910000004,
+    1199937.9649999999,
+    577.4142761230469
+  ],
+  "crs": "EPSG:2056",
+  "note": "Add this XYZ vector to every mesh vertex to recover absolute LV95 coordinates."
+}

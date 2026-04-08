@@ -95,14 +95,11 @@ python/
 ├── tile_fetcher.py                 On-demand tile download from swisstopo
 ├── area.py                         Step 4: GWR enrichment + floor area estimation
 ├── tests/                          Pytest unit + integration suite — see tests/README.md
-├── experimental/                   Standalone tools, not part of the main pipeline
-│   ├── floor-level-estimator.py       Earlier per-floor estimator (gbaup-based)
-│   └── roof-estimator/                Roof characteristics from swissBUILDINGS3D 3D meshes
 ├── requirements.txt                Runtime dependencies
 └── requirements-dev.txt            + pytest for the test suite
 ```
 
-> **Note on `experimental/`:** these are standalone tools that don't share code with the main pipeline and aren't covered by the main test suite. Each has its own `requirements.txt` if applicable. Older FME-based workbenches were moved to [../fme/experimental/](../fme/experimental/).
+> **Standalone exploration tools** that don't share code with the main pipeline (mesh builder, roof estimator, floor-level estimator) live in [../experimental/](../experimental/) at the project root. Older FME workbenches are in [../fme/experimental/](../fme/experimental/).
 
 ---
 

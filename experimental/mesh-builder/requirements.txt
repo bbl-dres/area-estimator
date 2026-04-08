@@ -1,0 +1,13 @@
+# Mesh Builder (experimental) — additional dependencies on top of python/requirements.txt
+#
+# rasterio, shapely, numpy, pandas, geopandas come from the parent requirements.
+
+# 3D mesh assembly + I/O (OBJ/PLY/glTF/STL)
+trimesh>=4.0.0
+
+# Constrained Delaunay triangulation (Shewchuk's Triangle, Python wrapper)
+triangle>=20230923
+
+# cKDTree for interior-vs-boundary point dedup. scipy is already a transitive
+# dependency of geopandas, but we use it directly here so it's pinned explicitly.
+scipy>=1.11.0

@@ -198,10 +198,11 @@ area-estimator/
 │   ├── area.py                       Step 4: GWR enrichment + floor area
 │   ├── tile_fetcher.py               On-demand tile download
 │   ├── tests/                        pytest suite — see python/tests/README.md
-│   ├── experimental/                 Standalone exploration tools (not in pipeline)
-│   │   ├── floor-level-estimator.py     Earlier per-floor estimator with gbaup factor
-│   │   └── roof-estimator/              Roof shape analysis from 3D meshes
 │   └── requirements.txt
+├── experimental/                  ← Standalone exploration tools (not in main pipeline)
+│   ├── mesh-builder/                 Watertight 3D building hulls + viewer ★
+│   ├── roof-estimator/               Roof shape analysis from 3D meshes
+│   └── floor-level-estimator.py      Earlier per-floor estimator with gbaup factor
 ├── fme/                           ← FME workbenches — see fme/README.md
 │   ├── README.md                     Volume Estimator pipeline summary
 │   ├── Volume Estimator FME.fmw      The main workbench (Steps 1–3)
@@ -219,11 +220,54 @@ area-estimator/
 
 ---
 
+## Experimental tools
+
+Self-contained tools that aren't part of the main pipeline live in [experimental/](experimental/). They share data inputs (AV cadastral, swissALTI3D, swissSURFACE3D) and a few helper modules from `python/`, but are independently runnable and have their own README each.
+
+### 🏗️ Mesh Builder — watertight 3D building hulls from cadastral footprints + DSM/DTM
+
+**[experimental/mesh-builder/](experimental/mesh-builder/)**
+
+Builds **watertight LoD2-ish 3D meshes** for any building in Switzerland — given the AV polygon and the swisstopo elevation rasters this repo already consumes. It exists because [swissBUILDINGS3D 3.0](https://www.swisstopo.admin.ch/en/landscape-model-swissbuildings3d-3-0-beta), the obvious source for 3D building geometry, is **inconsistent**: some buildings are excellent, others are unusable. This tool produces the same quality on every building in the country and degrades gracefully on weird footprints (it doesn't do plane fitting, so it has none of swissBUILDINGS3D's failure modes).
+
+**What it does**
+
+- Procedural watertight mesh per building (footprint-exact wall bases, slope-following floor, DSM-derived roof)
+- **Edge-preserving two-pass smoothing** kills DSM noise: vegetation, antennas, and stalactite-causing boundary samples in the fine pass; lift overruns, stair towers, and narrow chimneys in the coarse pass
+- Output as **PLY** (default), OBJ, glTF, or STL — coordinates are in local frame with a sidecar JSON recording the LV95 origin (sidesteps trimesh's float32 precision trap)
+- **In-browser viewer** (`viewer.html`) — single-file three.js, no build step, drag-and-drop OBJ/PLY/STL/glTF, surface coloring (red roof / grey walls / dark floor), live stats panel with volume + per-class surface areas + watertight verification
+
+**Quick start**
+
+```bash
+pip install -r python/requirements.txt
+pip install -r experimental/mesh-builder/requirements.txt
+
+cd experimental/mesh-builder
+python build_mesh.py ../../data/example.csv \
+    --av <path-to-AV.gpkg> \
+    --dsm-dir <swissSURFACE3D-dir> \
+    --dtm-dir <swissALTI3D-dir> \
+    --output-dir ./out
+```
+
+Then open `viewer.html` in a browser and drag a generated `.ply` onto it.
+
+See [experimental/mesh-builder/README.md](experimental/mesh-builder/README.md) for the full algorithm description, tuning constants, and limitations.
+
+### Other experimental tools
+
+| Tool | Status | What it does |
+|---|---|---|
+| [experimental/roof-estimator/](experimental/roof-estimator/) | unmaintained | Roof characteristics from swissBUILDINGS3D 3D meshes |
+| [experimental/floor-level-estimator.py](experimental/floor-level-estimator.py) | unmaintained | Earlier per-floor estimator (gbaup-based) |
+
+---
+
 ## Future Development
 
 | Feature | Description |
 |---------|-------------|
-| Watertight 3D mesh | Generate closed building geometry from elevation data |
 | Roof geometry estimation | Classify roof shapes (flat, gable, hip) and estimate roof surface areas |
 | Outer wall quantities | Estimate exterior wall areas from footprint perimeter and height metrics |
 | Material classification | Building material detection from imagery or other data sources |

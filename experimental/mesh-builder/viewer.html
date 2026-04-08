@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mesh Viewer — area-estimator</title>
+<style>
+  :root {
+    --bg: #1a1a1a;
+    --panel: rgba(30, 30, 30, 0.92);
+    --text: #e8e8e8;
+    --accent: #4a9eff;
+    --border: #444;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: var(--bg); color: var(--text); }
+  #canvas-container { position: absolute; inset: 0; }
+  canvas { display: block; }
+
+  #panel {
+    position: absolute; top: 16px; left: 16px; width: 280px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 16px; backdrop-filter: blur(8px); font-size: 13px; line-height: 1.5;
+  }
+  #panel h1 { margin: 0 0 12px; font-size: 15px; font-weight: 600; }
+  #panel .hint { color: #999; font-size: 12px; margin-bottom: 12px; }
+  #panel label { display: flex; align-items: center; gap: 8px;
+    margin: 6px 0; cursor: pointer; user-select: none; }
+  #panel input[type="checkbox"] { accent-color: var(--accent); }
+  #panel button { display: block; width: 100%;
+    padding: 8px 12px; margin-top: 8px;
+    background: var(--accent); color: white; border: none;
+    border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500; }
+  #panel button:hover { background: #5fa9ff; }
+  #panel button.secondary { background: transparent;
+    border: 1px solid var(--border); color: var(--text); }
+  #panel button.secondary:hover { background: rgba(255,255,255,0.05); }
+  #stats { margin-top: 12px; padding-top: 12px;
+    border-top: 1px solid var(--border); font-family: ui-monospace, "SF Mono", Consolas, monospace;
+    font-size: 11px; color: #b8b8b8; }
+  #stats div { display: flex; justify-content: space-between; padding: 2px 0; }
+  #stats .ok { color: #4ade80; }
+  #stats .warn { color: #fbbf24; }
+
+  #drop-overlay {
+    position: absolute; inset: 0;
+    background: rgba(74, 158, 255, 0.15);
+    border: 3px dashed var(--accent);
+    pointer-events: none; opacity: 0;
+    transition: opacity 0.15s; z-index: 100;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 24px; color: var(--accent); font-weight: 600;
+  }
+  #drop-overlay.active { opacity: 1; }
+
+  #empty {
+    position: absolute; inset: 0; pointer-events: none;
+    display: flex; align-items: center; justify-content: center;
+    color: #666; font-size: 18px; text-align: center;
+  }
+  #empty.hidden { display: none; }
+</style>
+</head>
+<body>
+
+<div id="canvas-container"></div>
+
+<div id="empty">Drop an OBJ file anywhere<br><span style="font-size:13px;">or use the picker on the left</span></div>
+
+<div id="drop-overlay">Drop to load</div>
+
+<div id="panel">
+  <h1>Mesh Viewer</h1>
+  <div class="hint">For inspecting <code>build_mesh.py</code> output. Loads OBJ / PLY / STL / glTF.</div>
+
+  <input type="file" id="file-input" accept=".obj,.ply,.stl,.glb,.gltf" style="display:none">
+  <button id="pick-btn">Open file…</button>
+  <button id="reset-btn" class="secondary">Reset view</button>
+
+  <label><input type="checkbox" id="wireframe-cb"> Wireframe</label>
+  <label><input type="checkbox" id="edges-cb" checked> Show edges</label>
+  <label><input type="checkbox" id="floor-grid-cb" checked> Reference grid</label>
+  <label><input type="checkbox" id="surface-cb" checked> Colour by surface (roof / wall / floor)</label>
+  <label><input type="checkbox" id="normals-cb"> Colour by normals (debug)</label>
+
+  <div id="stats">
+    <div><span>file</span><span id="stat-file">—</span></div>
+    <div><span>vertices</span><span id="stat-verts">—</span></div>
+    <div><span>faces</span><span id="stat-faces">—</span></div>
+    <div><span>size (m)</span><span id="stat-size">—</span></div>
+    <div><span>watertight</span><span id="stat-watertight">—</span></div>
+    <div><span>volume</span><span id="stat-volume">—</span></div>
+    <div><span>roof area</span><span id="stat-roof">—</span></div>
+    <div><span>wall area</span><span id="stat-wall">—</span></div>
+    <div><span>floor area</span><span id="stat-floor">—</span></div>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls }    from "three/addons/controls/OrbitControls.js";
+import { OBJLoader }        from "three/addons/loaders/OBJLoader.js";
+import { PLYLoader }        from "three/addons/loaders/PLYLoader.js";
+import { STLLoader }        from "three/addons/loaders/STLLoader.js";
+import { GLTFLoader }       from "three/addons/loaders/GLTFLoader.js";
+import { mergeVertices }    from "three/addons/utils/BufferGeometryUtils.js";
+
+// ── Scene setup ─────────────────────────────────────────────────────────────
+const container = document.getElementById("canvas-container");
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a1a1a);
+
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 5000);
+camera.position.set(40, 40, 40);
+camera.up.set(0, 0, 1);  // Z-up to match LV95 / engineering convention
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(window.innerWidth, window.innerHeight);
+container.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+
+// Lights — three-point setup so all faces are visible
+scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+const keyLight = new THREE.DirectionalLight(0xffffff, 0.9);
+keyLight.position.set(50, 50, 100);
+scene.add(keyLight);
+const fillLight = new THREE.DirectionalLight(0xffffff, 0.4);
+fillLight.position.set(-50, -50, 30);
+scene.add(fillLight);
+
+// Reference grid (XY plane, Z up)
+const grid = new THREE.GridHelper(200, 40, 0x444444, 0x2a2a2a);
+grid.rotation.x = Math.PI / 2;
+scene.add(grid);
+
+// Axes helper (X red / Y green / Z blue)
+const axes = new THREE.AxesHelper(10);
+scene.add(axes);
+
+// ── Surface colouring constants ─────────────────────────────────────────────
+// RGB in [0, 1] for three.js. Three classes by face-normal Z component:
+// upward → roof, downward → floor, sideways → wall. The 0.3 threshold
+// admits roofs steeper than ~73° from vertical, which covers every realistic
+// pitched roof. The "wall" band catches anything in between, including the
+// non-vertical sides of the false stalactites we're seeing in real data.
+const SURFACE_THRESHOLD = 0.3;
+const COLOUR_ROOF  = [0.78, 0.24, 0.24];  // muted red
+const COLOUR_WALL  = [0.78, 0.80, 0.84];  // light cool grey
+const COLOUR_FLOOR = [0.35, 0.35, 0.37];  // dark grey
+
+// ── Materials ───────────────────────────────────────────────────────────────
+// Two standard materials: one for plain geometry, one for geometries that
+// carry vertex colours (PLY files with face colours, glTF, etc). Switching
+// materials at load time is cleaner than enabling vertexColors on a single
+// material — three.js prints warnings when vertexColors:true is set on a
+// geometry that has no colour attribute.
+const standardMat = new THREE.MeshStandardMaterial({
+  color: 0xc8d4e0,
+  metalness: 0.05,
+  roughness: 0.7,
+  flatShading: true,
+  side: THREE.DoubleSide,
+});
+const colouredMat = new THREE.MeshStandardMaterial({
+  vertexColors: true,
+  metalness: 0.05,
+  roughness: 0.7,
+  flatShading: true,
+  side: THREE.DoubleSide,
+});
+const normalMat = new THREE.MeshNormalMaterial({ flatShading: true, side: THREE.DoubleSide });
+
+// ── State ───────────────────────────────────────────────────────────────────
+let currentMesh = null;
+let currentEdges = null;
+// Cached geometries per loaded file. We keep the indexed copy for the
+// watertight check + edge overlay, the plain (no-colour) copy for grey
+// rendering, and a colour-by-surface copy lazily computed on first toggle.
+let geomIndexed   = null;  // indexed, no colour attribute
+let geomPlain     = null;  // either indexed or non-indexed, gets used as render geom when toggle is OFF
+let geomSurface   = null;  // non-indexed, with `color` attribute from face normals
+let fileHasColours = false;
+
+// ── Surface-colour computation ──────────────────────────────────────────────
+// Walks the indexed geometry, computes each face normal, and writes a vertex
+// colour attribute on a non-indexed clone (one colour triple per face vertex).
+// Non-indexed is required because each face needs its own colour — sharing a
+// vertex between a roof face and a wall face would force one colour to bleed
+// into the other.
+function colourBySurface(indexedGeom) {
+  const expanded = indexedGeom.toNonIndexed();
+  const positions = expanded.attributes.position.array;
+  const colors = new Float32Array(positions.length);
+
+  for (let i = 0; i < positions.length; i += 9) {
+    // Three vertices of one triangle
+    const ax = positions[i + 3] - positions[i];
+    const ay = positions[i + 4] - positions[i + 1];
+    const az = positions[i + 5] - positions[i + 2];
+    const bx = positions[i + 6] - positions[i];
+    const by = positions[i + 7] - positions[i + 1];
+    const bz = positions[i + 8] - positions[i + 2];
+    // Cross product → face normal
+    const nx = ay * bz - az * by;
+    const ny = az * bx - ax * bz;
+    const nz = ax * by - ay * bx;
+    const len = Math.hypot(nx, ny, nz) || 1;
+    const nzNorm = nz / len;
+
+    let c;
+    if (nzNorm > SURFACE_THRESHOLD)         c = COLOUR_ROOF;
+    else if (nzNorm < -SURFACE_THRESHOLD)   c = COLOUR_FLOOR;
+    else                                    c = COLOUR_WALL;
+
+    // Write the colour to all three vertices of this face
+    for (let j = 0; j < 9; j += 3) {
+      colors[i + j]     = c[0];
+      colors[i + j + 1] = c[1];
+      colors[i + j + 2] = c[2];
+    }
+  }
+  expanded.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  expanded.computeVertexNormals();
+  expanded.computeBoundingBox();
+  expanded.computeBoundingSphere();
+  return expanded;
+}
+
+// Pick the right geometry to render given the current toggle state.
+function pickRenderGeom() {
+  const surfaceOn = document.getElementById("surface-cb").checked;
+  if (fileHasColours) return geomPlain;            // file colours always win
+  if (!surfaceOn)     return geomPlain;
+  if (!geomSurface)   geomSurface = colourBySurface(geomIndexed);
+  return geomSurface;
+}
+
+function pickBaseMaterial() {
+  // Coloured material if either the file or the surface toggle provides colours
+  const surfaceOn = document.getElementById("surface-cb").checked;
+  return (fileHasColours || surfaceOn) ? colouredMat : standardMat;
+}
+
+function clearMesh() {
+  if (currentMesh) {
+    scene.remove(currentMesh);
+    currentMesh = null;
+  }
+  if (currentEdges) {
+    scene.remove(currentEdges);
+    currentEdges.geometry?.dispose();
+    currentEdges = null;
+  }
+  // Dispose all cached per-file geometries. For non-colour files, geomPlain
+  // and geomIndexed point at the *same* BufferGeometry, so we have to guard
+  // against disposing the same buffer twice. dispose() is idempotent in
+  // three.js, but the explicit check makes the intent clear and avoids the
+  // "wait, is this a bug?" reading time.
+  if (geomIndexed) geomIndexed.dispose();
+  if (geomPlain   && geomPlain   !== geomIndexed) geomPlain.dispose();
+  if (geomSurface && geomSurface !== geomIndexed) geomSurface.dispose();
+  geomIndexed = geomPlain = geomSurface = null;
+  fileHasColours = false;
+}
+
+function setMesh(geometry, filename) {
+  clearMesh();
+
+  // Centre the mesh on the world origin BEFORE re-indexing. LV95 coordinates
+  // sit in the millions; once translated to origin the float32 jitter that
+  // mergeVertices has to tolerate drops to ~10 µm, well within our 1e-5
+  // tolerance. Re-indexing before centring would force a much looser
+  // tolerance and risk welding adjacent-but-distinct vertices.
+  geometry.computeBoundingBox();
+  const center = new THREE.Vector3();
+  geometry.boundingBox.getCenter(center);
+  geometry.translate(-center.x, -center.y, -center.z);
+
+  // PLY files with baked face colours load as non-indexed (PLYLoader
+  // triplicates vertices so each face can carry its own colour). For those
+  // files we keep the loaded geometry as-is and build a separate indexed
+  // clone purely for the watertight check + edge overlay. For everything
+  // else (OBJ, PLY without colours, STL) we re-index in place.
+  //
+  // Whenever mergeVertices produces a *different* BufferGeometry from its
+  // input, we dispose the input — otherwise its GPU position buffer is
+  // leaked once it's uploaded by the renderer (the original is no longer
+  // referenced by anything we hold). Without this, every load leaks the
+  // raw loader output, which adds up across a debugging session.
+  fileHasColours = geometry.getAttribute("color") !== undefined;
+
+  if (fileHasColours) {
+    geomPlain = geometry;                                    // render this
+    const clone = geometry.clone();                          // mergeVertices reads from this
+    geomIndexed = mergeVertices(clone, 1e-5);                // for the watertight check
+    if (geomIndexed !== clone) clone.dispose();              // free the throw-away clone
+  } else if (!geometry.index) {
+    geomIndexed = mergeVertices(geometry, 1e-5);
+    if (geomIndexed !== geometry) geometry.dispose();        // free the original loader output
+    geomPlain = geomIndexed;                                 // same buffer, no colours
+  } else {
+    geomIndexed = geometry;
+    geomPlain = geomIndexed;                                 // same buffer, no colours
+  }
+  geomIndexed.computeVertexNormals();
+  geomIndexed.computeBoundingBox();
+  geomIndexed.computeBoundingSphere();
+
+  const renderGeom = pickRenderGeom();
+  renderGeom.computeVertexNormals();
+  renderGeom.computeBoundingBox();
+  renderGeom.computeBoundingSphere();
+
+  // Pick material: surface or file colours → colouredMat; else plain grey.
+  // The "color by normals" debug toggle still overrides both.
+  const baseMat = pickBaseMaterial();
+  currentMesh = new THREE.Mesh(renderGeom, document.getElementById("normals-cb").checked ? normalMat : baseMat);
+  currentMesh.material.wireframe = document.getElementById("wireframe-cb").checked;
+  scene.add(currentMesh);
+
+  // Edge overlay always uses the indexed geometry — shared edges render once
+  const edgesGeom = new THREE.EdgesGeometry(geomIndexed, 1);
+  currentEdges = new THREE.LineSegments(edgesGeom, new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35 }));
+  currentEdges.visible = document.getElementById("edges-cb").checked;
+  scene.add(currentEdges);
+
+  // Frame the camera around the mesh. We must use `renderGeom` here, not the
+  // raw loader output `geometry` — for OBJ files, mergeVertices produced a
+  // brand-new BufferGeometry and only the merged copy has its bounding sphere
+  // computed. The original `geometry` parameter still has a null sphere and
+  // would crash on `.radius`.
+  const sphere = renderGeom.boundingSphere;
+  const dist = sphere.radius * 2.4;
+  camera.position.set(dist, dist, dist * 0.8);
+  controls.target.set(0, 0, 0);
+  controls.update();
+
+  // Resize the reference grid to fit
+  const sz = renderGeom.boundingBox.getSize(new THREE.Vector3());
+  const gridSize = Math.max(sz.x, sz.y) * 2;
+  grid.scale.setScalar(gridSize / 200);
+
+  document.getElementById("empty").classList.add("hidden");
+  updateStats(renderGeom, geomIndexed, filename);
+}
+
+// ── Stats ───────────────────────────────────────────────────────────────────
+function updateStats(renderGeom, watertightGeom, filename) {
+  // The "logical" face count is what the indexed (watertight) geometry has —
+  // that's the count the build script reports too. The render geometry may
+  // have triplicated vertices (PLY with face colours, or surface-coloured
+  // copies), so its position count is misleading.
+  const verts = watertightGeom.attributes.position.count;
+  const faces = watertightGeom.index ? watertightGeom.index.count / 3 : verts / 3;
+  renderGeom.computeBoundingBox();
+  const sz = renderGeom.boundingBox.getSize(new THREE.Vector3());
+
+  document.getElementById("stat-file").textContent = filename;
+  document.getElementById("stat-verts").textContent = verts.toLocaleString();
+  document.getElementById("stat-faces").textContent = Math.round(faces).toLocaleString();
+  document.getElementById("stat-size").textContent =
+    `${sz.x.toFixed(1)} × ${sz.y.toFixed(1)} × ${sz.z.toFixed(1)}`;
+
+  // 2·F == E for a closed manifold (every edge shared by exactly 2 faces).
+  const watertightEl = document.getElementById("stat-watertight");
+  const closed = watertightGeom.index ? checkClosedManifold(watertightGeom) : false;
+  if (watertightGeom.index) {
+    watertightEl.textContent = closed ? "yes" : "no";
+    watertightEl.className = closed ? "ok" : "warn";
+  } else {
+    watertightEl.textContent = "n/a";
+    watertightEl.className = "";
+  }
+
+  // Volume + per-class areas, computed in one pass over the indexed faces.
+  // Volume is meaningful only for a closed manifold — show n/a otherwise.
+  const stats = computeMeshStats(watertightGeom);
+  const fmtArea = (v) => `${Math.round(v).toLocaleString()} m²`;
+  const fmtVol  = (v) => `${Math.round(v).toLocaleString()} m³`;
+
+  document.getElementById("stat-volume").textContent =
+    closed ? fmtVol(stats.volume) : "n/a";
+  document.getElementById("stat-roof").textContent  = fmtArea(stats.roofArea);
+  document.getElementById("stat-wall").textContent  = fmtArea(stats.wallArea);
+  document.getElementById("stat-floor").textContent = fmtArea(stats.floorArea);
+}
+
+function computeMeshStats(geometry) {
+  // Single pass over the indexed faces yields four numbers we care about:
+  // signed volume (divergence theorem), and surface area split by face-normal
+  // class (same nz threshold the colouring uses, so stats and colours agree).
+  if (!geometry.index) {
+    return { volume: NaN, roofArea: 0, wallArea: 0, floorArea: 0 };
+  }
+  const pos = geometry.attributes.position.array;
+  const idx = geometry.index.array;
+
+  let signedVolume = 0;
+  let roofArea = 0, wallArea = 0, floorArea = 0;
+
+  for (let i = 0; i < idx.length; i += 3) {
+    const a = idx[i] * 3, b = idx[i + 1] * 3, c = idx[i + 2] * 3;
+
+    const x0 = pos[a],     y0 = pos[a + 1], z0 = pos[a + 2];
+    const x1 = pos[b],     y1 = pos[b + 1], z1 = pos[b + 2];
+    const x2 = pos[c],     y2 = pos[c + 1], z2 = pos[c + 2];
+
+    // Signed tetrahedron volume (origin, v0, v1, v2). Sum over all faces of a
+    // closed mesh equals the enclosed volume by the divergence theorem; the
+    // origin can be anywhere. Sign reflects winding — we abs() at the end.
+    signedVolume += (
+      x0 * (y1 * z2 - y2 * z1) -
+      y0 * (x1 * z2 - x2 * z1) +
+      z0 * (x1 * y2 - x2 * y1)
+    ) / 6;
+
+    // Face area from cross-product magnitude
+    const ex = x1 - x0, ey = y1 - y0, ez = z1 - z0;
+    const fx = x2 - x0, fy = y2 - y0, fz = z2 - z0;
+    const cx = ey * fz - ez * fy;
+    const cy = ez * fx - ex * fz;
+    const cz = ex * fy - ey * fx;
+    const len = Math.hypot(cx, cy, cz);
+    const area = len * 0.5;
+    const nz = len > 0 ? cz / len : 0;
+
+    if      (nz >  SURFACE_THRESHOLD) roofArea  += area;
+    else if (nz < -SURFACE_THRESHOLD) floorArea += area;
+    else                              wallArea  += area;
+  }
+
+  return {
+    volume: Math.abs(signedVolume),
+    roofArea, wallArea, floorArea,
+  };
+}
+
+function checkClosedManifold(geometry) {
+  // Build edge → count map. For a closed manifold every edge appears in
+  // exactly 2 triangles. Triangle.is_watertight uses the same criterion.
+  const idx = geometry.index.array;
+  const edgeCount = new Map();
+  const key = (a, b) => (a < b ? `${a}_${b}` : `${b}_${a}`);
+  for (let i = 0; i < idx.length; i += 3) {
+    const a = idx[i], b = idx[i + 1], c = idx[i + 2];
+    for (const [u, v] of [[a, b], [b, c], [c, a]]) {
+      const k = key(u, v);
+      edgeCount.set(k, (edgeCount.get(k) || 0) + 1);
+    }
+  }
+  for (const v of edgeCount.values()) if (v !== 2) return false;
+  return true;
+}
+
+// ── File loading ────────────────────────────────────────────────────────────
+function loadFile(file) {
+  const ext = file.name.split(".").pop().toLowerCase();
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      let geometry;
+      if (ext === "obj") {
+        const obj = new OBJLoader().parse(e.target.result);
+        geometry = firstMeshGeometry(obj);
+      } else if (ext === "ply") {
+        geometry = new PLYLoader().parse(e.target.result);
+      } else if (ext === "stl") {
+        geometry = new STLLoader().parse(e.target.result);
+      } else if (ext === "glb" || ext === "gltf") {
+        // .glb is binary (ArrayBuffer), .gltf is JSON text. GLTFLoader.parse
+        // accepts both forms but the data must match the format.
+        new GLTFLoader().parse(e.target.result, "", (gltf) => {
+          setMesh(firstMeshGeometry(gltf.scene), file.name);
+        }, (err) => alert(`glTF parse error: ${err.message}`));
+        return;
+      } else {
+        alert(`Unsupported format: .${ext}`);
+        return;
+      }
+      setMesh(geometry, file.name);
+    } catch (err) {
+      console.error(err);
+      alert(`Failed to load ${file.name}: ${err.message}`);
+    }
+  };
+  // OBJ and .gltf are text; PLY (binary or ASCII handled by loader), STL,
+  // and .glb are binary. PLYLoader and STLLoader both accept ArrayBuffer
+  // for binary and ASCII variants alike.
+  const isText = ext === "obj" || ext === "gltf";
+  if (isText) reader.readAsText(file);
+  else reader.readAsArrayBuffer(file);
+}
+
+function firstMeshGeometry(group) {
+  // Walk a Group/Scene and return the first child mesh's geometry.
+  // build_mesh.py emits single-mesh OBJs so this is sufficient; if you ever
+  // load a multi-mesh file, only the first part will appear (and you'll see
+  // a low face count in the stats panel as the tell).
+  let found = null;
+  group.traverse((child) => {
+    if (!found && child.isMesh) found = child.geometry;
+  });
+  if (!found) throw new Error("No mesh data found");
+  return found;
+}
+
+// ── UI wiring ───────────────────────────────────────────────────────────────
+const fileInput = document.getElementById("file-input");
+document.getElementById("pick-btn").addEventListener("click", () => fileInput.click());
+fileInput.addEventListener("change", (e) => {
+  if (e.target.files.length) {
+    loadFile(e.target.files[0]);
+    // Clear the input so picking the *same* file again still fires `change`.
+    // Without this, an iterative debug workflow (rebuild externally, re-pick
+    // to inspect) silently does nothing on the second pick.
+    e.target.value = "";
+  }
+});
+
+document.getElementById("reset-btn").addEventListener("click", () => {
+  if (!currentMesh) return;
+  const sphere = currentMesh.geometry.boundingSphere;
+  const dist = sphere.radius * 2.4;
+  camera.position.set(dist, dist, dist * 0.8);
+  controls.target.set(0, 0, 0);
+  controls.update();
+});
+
+document.getElementById("wireframe-cb").addEventListener("change", (e) => {
+  if (currentMesh) currentMesh.material.wireframe = e.target.checked;
+});
+document.getElementById("edges-cb").addEventListener("change", (e) => {
+  if (currentEdges) currentEdges.visible = e.target.checked;
+});
+document.getElementById("floor-grid-cb").addEventListener("change", (e) => {
+  grid.visible = e.target.checked;
+  axes.visible = e.target.checked;
+});
+document.getElementById("surface-cb").addEventListener("change", () => {
+  if (!currentMesh) return;
+  // Hot-swap the geometry and material based on the new toggle state. The
+  // edge overlay always lives on the indexed geometry, so it doesn't need
+  // to change. The normals debug toggle takes precedence over surface
+  // colours when active.
+  currentMesh.geometry = pickRenderGeom();
+  if (!document.getElementById("normals-cb").checked) {
+    currentMesh.material = pickBaseMaterial();
+    currentMesh.material.wireframe = document.getElementById("wireframe-cb").checked;
+  }
+});
+
+document.getElementById("normals-cb").addEventListener("change", (e) => {
+  if (!currentMesh) return;
+  currentMesh.material = e.target.checked ? normalMat : pickBaseMaterial();
+  currentMesh.material.wireframe = document.getElementById("wireframe-cb").checked;
+});
+
+// Drag and drop. Use an enter/leave counter — dragenter and dragleave fire on
+// every child element traversed, so checking e.target alone causes flicker.
+const dropOverlay = document.getElementById("drop-overlay");
+let dragDepth = 0;
+window.addEventListener("dragenter", (e) => {
+  e.preventDefault();
+  dragDepth++;
+  dropOverlay.classList.add("active");
+});
+window.addEventListener("dragover", (e) => e.preventDefault());
+window.addEventListener("dragleave", (e) => {
+  e.preventDefault();
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (dragDepth === 0) dropOverlay.classList.remove("active");
+});
+window.addEventListener("drop", (e) => {
+  e.preventDefault();
+  dragDepth = 0;
+  dropOverlay.classList.remove("active");
+  if (e.dataTransfer.files.length) loadFile(e.dataTransfer.files[0]);
+});
+
+// ── Render loop ─────────────────────────────────────────────────────────────
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
