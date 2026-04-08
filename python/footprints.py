@@ -178,17 +178,21 @@ def _load_av_buildings(av_path, bbox_lv95=None, where_sql=None):
 
 def _read_input_csv(csv_path):
     """
-    Read a CSV with comma- or semicolon-delimiter auto-detect.
+    Read a CSV with comma- or semicolon-delimiter auto-detect and BOM
+    handling.
 
-    The web app uses ``;``, the Python world expects ``,`` — accepting both
-    means a single CSV (e.g. data/example.csv) works in both tools.
+    - The web app uses ``;``, the Python world expects ``,`` — accepting
+      both means a single CSV (e.g. data/example.csv) works in both tools.
+    - ``utf-8-sig`` transparently strips a UTF-8 BOM if one is present
+      (Excel and many Windows tools save CSVs with BOM by default), so the
+      first column header doesn't come through as ``\\ufeffid``.
     """
     csv_path = Path(csv_path)
     if not csv_path.exists():
         raise FileNotFoundError(f"CSV not found: {csv_path}")
 
     # python engine + sep=None enables csv.Sniffer auto-detection
-    df = pd.read_csv(csv_path, sep=None, engine='python')
+    df = pd.read_csv(csv_path, sep=None, engine='python', encoding='utf-8-sig')
     df.columns = [c.lower().strip() for c in df.columns]
     return df
 
@@ -360,13 +364,7 @@ def load_footprints_from_av_with_coordinates(av_path, csv_path, limit=None):
         input_id, input_egid, input_lon, input_lat,
         av_egid, fid, area_official_m2, geometry, status_step1, warnings
     """
-    csv_path = Path(csv_path)
-    if not csv_path.exists():
-        raise FileNotFoundError(f"CSV not found: {csv_path}")
-
-    # ── Load CSV ──────────────────────────────────────────────────────────
-    df = pd.read_csv(csv_path)
-    df.columns = [c.lower().strip() for c in df.columns]
+    df = _read_input_csv(csv_path)
 
     missing = [c for c in ['lon', 'lat', 'id'] if c not in df.columns]
     if missing:
