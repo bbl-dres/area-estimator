@@ -51,7 +51,7 @@ def _download_tile(tile_id, url_template, output_dir, label):
     """
     existing = list(output_dir.glob(f"*_{tile_id}_*.tif"))
     if existing:
-        log.debug(f"{label} {tile_id}: already local")
+        log.debug("%s %s: already local", label, tile_id)
         return True
 
     for year in YEARS_TO_TRY:
@@ -66,8 +66,8 @@ def _download_tile(tile_id, url_template, output_dir, label):
             dest = output_dir / filename
             tmp = dest.with_suffix(dest.suffix + ".tmp")
 
-            log.debug(f"{label} {tile_id}: downloading {size_mb:.1f} MB (year={year})")
-            t0 = time.time()
+            log.debug("%s %s: downloading %.1f MB (year=%s)", label, tile_id, size_mb, year)
+            t0 = time.monotonic()
 
             resp = requests.get(url, stream=True, timeout=DOWNLOAD_TIMEOUT)
             resp.raise_for_status()
@@ -76,12 +76,12 @@ def _download_tile(tile_id, url_template, output_dir, label):
                     f.write(chunk)
             tmp.replace(dest)
 
-            elapsed = time.time() - t0
-            log.debug(f"{label} {tile_id}: done ({elapsed:.0f}s, {size_mb/elapsed:.1f} MB/s)")
+            elapsed = time.monotonic() - t0
+            log.debug("%s %s: done (%.0fs, %.1f MB/s)", label, tile_id, elapsed, size_mb / elapsed)
             return True
 
         except requests.RequestException as e:
-            log.debug(f"{label} {tile_id}: error for year {year}: {e}")
+            log.debug("%s %s: error for year %s: %s", label, tile_id, year, e)
             continue
 
     log.warning(f"{label} {tile_id}: NOT FOUND on server")
@@ -108,7 +108,7 @@ def ensure_tiles(tile_ids, alti3d_dir, surface3d_dir):
     stats = {"alti3d_ok": 0, "surface3d_ok": 0, "alti3d_missing": 0, "surface3d_missing": 0}
     sorted_ids = sorted(tile_ids)
     total = len(sorted_ids)
-    t_start = time.time()
+    t_start = time.monotonic()
 
     for i, tile_id in enumerate(sorted_ids):
         if _download_tile(tile_id, ALTI3D_URL, alti3d_dir, "ALTI3D"):
@@ -123,7 +123,7 @@ def ensure_tiles(tile_ids, alti3d_dir, surface3d_dir):
 
         # Progress every 10 tiles or at end
         if (i + 1) % 10 == 0 or (i + 1) == total:
-            elapsed = time.time() - t_start
+            elapsed = time.monotonic() - t_start
             rate = (i + 1) / elapsed if elapsed > 0 else 0
             eta = (total - i - 1) / rate if rate > 0 else 0
             eta_m, eta_s = divmod(int(eta), 60)

@@ -1,7 +1,21 @@
 #!/usr/bin/env python 3
 """
-Floor level estimator
+Floor level estimator — experimental
 
+Standalone exploration of floor-count estimation that adds a
+construction-period (gbaup) factor on top of the GWR floor-height table.
+Lives outside the active pipeline (../area.py is what main.py uses), but
+kept here as reference because the gbaup factor captures real-world
+intuition about how floor heights have shifted across construction eras
+(representative pre-1919 buildings, post-war rationalisation, modern
+Minergie comfort, etc.) — a refinement the documented Seiler & Seiler 2020
+methodology doesn't model.
+
+If the gbaup factors prove themselves on real data, the next step would be
+to fold them into ../area.py as an optional refinement. Until then this
+file is intentionally not imported anywhere.
+
+Original description:
 Calculates number of floors of a building using buidling volumes (generated from area footprints and swissBuildings3D measurements)
 while using different floor heights for different building types. Building types (gkat and gklas) and construction periods (gbaup) are
 obtained from the GWR classifictaion

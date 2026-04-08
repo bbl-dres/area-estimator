@@ -3,10 +3,10 @@
 Swiss Building Volume & Area Estimator
 
 Unified CLI that runs the full pipeline:
-  Step 1 — Read building footprints (geodata file or CSV coordinates)
-  Step 2 — Ensure all required elevation tiles are available (download if --auto-fetch)
-  Step 3 — Create aligned 1×1m grid + sample elevations + calculate volume
-  Step 4 — Estimate floor areas using GWR classification (optional, off by default)
+  Step 1 — Read building footprints           [footprints.py]
+  Step 2 — Ensure required elevation tiles    [tile_fetcher.py]
+  Step 3 — Aligned grid + volume + heights    [volume.py]
+  Step 4 — GWR enrichment + floor areas       [area.py, optional]
 
 Output is always a CSV file.
 """
@@ -20,18 +20,22 @@ from pathlib import Path
 
 import pandas as pd
 
-from footprints import load_footprints_from_file, load_footprints_from_av_with_csv_filter
-from volume import TileIndex, calculate_building_volume
+from footprints import (
+    load_footprints_from_file,
+    load_footprints_from_av_with_egids,
+    load_footprints_from_av_with_coordinates,
+)
+from volume import TileIndex, calculate_building_volume, make_empty_volume_result, append_warning
 from tile_fetcher import ensure_tiles, tile_ids_from_bounds
-from gwr import enrich_with_gwr
-from area import estimate_floor_area
+from area import enrich_with_gwr, estimate_floor_area
 
 
-def setup_logging(output_path):
-    """Configure file + console logging. Log goes next to the output CSV."""
+def setup_logging(output_path, timestamp):
+    """Configure file + console logging. Log file is named with `timestamp`
+    and dropped next to the output CSV. Idempotent if main() runs more than
+    once in the same process (e.g. from a notebook or test runner)."""
     log_dir = Path(output_path).parent
     log_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_file = log_dir / f"run_{timestamp}.log"
 
     file_handler = logging.FileHandler(log_file, encoding="utf-8")
@@ -45,6 +49,7 @@ def setup_logging(output_path):
     console_handler.setFormatter(logging.Formatter("%(message)s"))
 
     root = logging.getLogger()
+    root.handlers.clear()  # avoid stacking handlers across repeat invocations
     root.setLevel(logging.DEBUG)
     root.addHandler(file_handler)
     root.addHandler(console_handler)
@@ -62,17 +67,22 @@ def main():
                     'estimates building volumes and floor areas from elevation models'
     )
 
-    # Input: building footprints — two modes:
-    #   --footprints only             → all buildings in file
-    #   --footprints + --coordinates  → spatial join: one AV polygon per CSV point
+    # Input: building footprints. Three modes:
+    #   --footprints only                       → all buildings in the AV file
+    #   --footprints + --csv                    → EGID match (default for CSV input)
+    #   --footprints + --csv --use-coordinates  → spatial join via lon/lat
     parser.add_argument('--footprints', required=True,
                         help='Geodata file with building footprints '
                              '(GeoPackage, Shapefile, or GeoJSON from Amtliche Vermessung).')
-    parser.add_argument('--coordinates',
-                        help='CSV file with WGS84 coordinates (columns: id, lon, lat; '
-                             'optional: egid for reference). When provided, filters the AV file '
-                             'to only buildings containing a CSV point (strict spatial join, '
-                             'no fallbacks).')
+    parser.add_argument('--csv',
+                        help='CSV input file. By default looks up buildings by `egid` '
+                             '(columns: id, egid). With --use-coordinates, instead does a '
+                             'spatial join via lon/lat (columns: id, lon, lat). '
+                             'Comma- and semicolon-delimited CSVs both work.')
+    parser.add_argument('--use-coordinates', action='store_true',
+                        help='Match buildings via lon/lat spatial join instead of EGID. '
+                             'Required only for buildings that have no EGID assigned in '
+                             'the cadastral data; EGID match is faster and unambiguous.')
 
     # Input: elevation tiles
     parser.add_argument('--alti3d', required=True,
@@ -105,7 +115,9 @@ def main():
 
     args = parser.parse_args()
 
-    # Add timestamp to output filename
+    # One timestamp drives the output filename and the log filename so they
+    # always agree (the previous code computed two timestamps a fraction of
+    # a second apart).
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     if not args.output:
         args.output = str(Path("data/output") / f"result_{timestamp}.csv")
@@ -114,7 +126,7 @@ def main():
         args.output = str(p.parent / f"{p.stem}_{timestamp}{p.suffix}")
 
     # ── Logging ────────────────────────────────────────────────────────────
-    log_file = setup_logging(args.output)
+    log_file = setup_logging(args.output, timestamp)
     log = logging.getLogger("main")
     log.info(f"Log file: {log_file}")
 
@@ -138,18 +150,27 @@ def main():
     log.info("STEP 1: Loading building footprints")
     log.info("=" * 50)
 
+    if args.use_coordinates and not args.csv:
+        log.error("--use-coordinates requires --csv")
+        return 1
+
     try:
-        if args.coordinates:
-            log.info("Mode: spatial join — AV footprints filtered to CSV points")
-            buildings = load_footprints_from_av_with_csv_filter(
-                args.footprints, args.coordinates, limit=args.limit,
+        if args.csv and args.use_coordinates:
+            log.info("Mode: AV + CSV (lon/lat spatial join)")
+            buildings = load_footprints_from_av_with_coordinates(
+                args.footprints, args.csv, limit=args.limit,
+            )
+        elif args.csv:
+            log.info("Mode: AV + CSV (EGID match)")
+            buildings = load_footprints_from_av_with_egids(
+                args.footprints, args.csv, limit=args.limit,
             )
         else:
             log.info("Mode: all buildings from AV file")
             buildings = load_footprints_from_file(
                 args.footprints, bbox=args.bbox, limit=args.limit,
             )
-    except Exception as e:
+    except (FileNotFoundError, ValueError) as e:
         log.error(f"Error loading input: {e}")
         return 1
 
@@ -178,9 +199,9 @@ def main():
 
     if args.auto_fetch:
         log.info(f"  Auto-fetching missing tiles from swisstopo...")
-        t_fetch = time.time()
+        t_fetch = time.monotonic()
         stats = ensure_tiles(all_tile_ids, alti3d_dir, surface3d_dir)
-        fetch_elapsed = time.time() - t_fetch
+        fetch_elapsed = time.monotonic() - t_fetch
 
         log.info(f"  ALTI3D:    {stats['alti3d_ok']} ok, {stats['alti3d_missing']} missing")
         log.info(f"  SURFACE3D: {stats['surface3d_ok']} ok, {stats['surface3d_missing']} missing")
@@ -198,41 +219,50 @@ def main():
 
     try:
         results = []
-        t_start = time.time()
+        t_start = time.monotonic()
+
+        # Columns the result dict already populates — never let an input
+        # column with the same name overwrite a computed value. `warnings`
+        # is owned by the result but is *appended to*, not overwritten,
+        # so we handle it explicitly below. `status_step1` is allowed
+        # through (the input column carries the Step 1 outcome verbatim).
+        reserved_input_cols = {'id', 'geometry', 'warnings'}
 
         for i, (_, row) in enumerate(buildings.iterrows()):
+            step1_warnings = row.get('warnings') or ''
+
             if row['status_step1'] != 'ok':
-                # No footprint — carry forward metadata with empty volume
-                result = {
-                    'av_egid': row.get('av_egid'), 'fid': row.get('fid'),
-                    'area_footprint_m2': None, 'area_official_m2': None,
-                    'volume_above_ground_m3': None,
-                    'elevation_base_min_m': None, 'elevation_base_mean_m': None,
-                    'elevation_base_max_m': None,
-                    'elevation_roof_min_m': None, 'elevation_roof_mean_m': None,
-                    'elevation_roof_max_m': None, 'height_mean_m': None,
-                    'height_max_m': None, 'height_minimal_m': None,
-                    'grid_points_count': None, 'status_step3': f"skipped:{row['status_step1']}",
-                }
+                result = make_empty_volume_result(
+                    av_egid=row.get('av_egid'),
+                    fid=row.get('fid'),
+                    area_official_m2=row.get('area_official_m2'),
+                    status_step3=f"skipped:{row['status_step1']}",
+                    warnings=step1_warnings,
+                )
             else:
                 result = calculate_building_volume(
                     polygon=row.geometry,
                     tile_index=tile_index,
                     av_egid=row.get('av_egid'),
                     fid=row.get('fid'),
-                    area_official_m2=row['area_official_m2'],
+                    area_official_m2=row.get('area_official_m2'),
                 )
+                # Carry Step 1 warnings into the success path too.
+                if step1_warnings:
+                    append_warning(result, step1_warnings)
 
-            # Preserve extra columns from input (e.g. input_id)
+            # Preserve extra input columns (e.g. input_id) — but never
+            # overwrite a key the result dict already owns.
             for col in buildings.columns:
-                if col not in ('id', 'av_egid', 'fid', 'area_official_m2', 'geometry', 'status_step1'):
-                    result[col] = row[col]
+                if col in reserved_input_cols or col in result:
+                    continue
+                result[col] = row[col]
 
             results.append(result)
 
             # Progress
             if (i + 1) % 100 == 0 or (i + 1) == total:
-                elapsed = time.time() - t_start
+                elapsed = time.monotonic() - t_start
                 rate = (i + 1) / elapsed if elapsed > 0 else 0
                 eta = (total - i - 1) / rate if rate > 0 else 0
                 eta_m, eta_s = divmod(int(eta), 60)
@@ -242,7 +272,7 @@ def main():
     finally:
         tile_index.close()
 
-    elapsed = time.time() - t_start
+    elapsed = time.monotonic() - t_start
     log.info(f"\n  Processed {len(results)} buildings in {elapsed:.0f}s")
 
     results_df = pd.DataFrame(results)

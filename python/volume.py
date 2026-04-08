@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """
-Step 3 — Sample Elevations & Calculate Volume
+Steps 2 & 3 — Aligned Grid + Volume
 
-Samples terrain (swissALTI3D) and surface (swissSURFACE3D) elevations at each
-grid point, then calculates building volume and all height metrics.
+Step 2: Generates an orientation-aligned 1×1m grid within each building
+footprint, rotated to the longest edge so non-axis-aligned buildings are
+covered tightly.
+
+Step 3: Samples terrain (swissALTI3D) and surface (swissSURFACE3D) elevations
+at each grid point, then calculates building volume and all height metrics.
 
 Outputs per building:
 - volume_above_ground_m3
@@ -19,17 +23,117 @@ Outputs per building:
 """
 
 import logging
+from collections import OrderedDict
 from pathlib import Path
+
 import numpy as np
 import rasterio
+from shapely import contains_xy
+from shapely.affinity import rotate
 
-from grid import create_aligned_grid_points
 from tile_fetcher import tile_ids_from_bounds
 
 log = logging.getLogger(__name__)
 
-# LRU-style tile cache limit (each open tile = one file handle)
+# LRU tile cache size (each cached tile = one open file handle)
 MAX_CACHED_TILES = 200
+
+
+# ── Step 2: Aligned Grid ────────────────────────────────────────────────────
+
+
+def get_building_orientation(polygon):
+    """
+    Calculate building orientation using minimum area bounding rectangle.
+
+    Returns rotation angle in degrees (angle of the longest edge).
+    Returns 0.0 for degenerate polygons (too small or linear).
+    """
+    min_rect = polygon.minimum_rotated_rectangle
+
+    # Guard against degenerate geometry (point or line)
+    if min_rect.geom_type != 'Polygon' or min_rect.area < 1e-6:
+        return 0.0
+
+    coords = list(min_rect.exterior.coords)
+
+    edge_lengths = []
+    angles = []
+
+    for i in range(len(coords) - 1):
+        x1, y1 = coords[i]
+        x2, y2 = coords[i + 1]
+
+        length = np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+        angle = np.degrees(np.arctan2(y2 - y1, x2 - x1))
+
+        edge_lengths.append(length)
+        angles.append(angle)
+
+    longest_idx = np.argmax(edge_lengths)
+    return angles[longest_idx]
+
+
+def create_aligned_grid_points(polygon, voxel_size=1.0):
+    """
+    Create grid points aligned to building orientation.
+
+    Algorithm:
+    1. Compute building orientation from minimum rotated rectangle
+    2. Rotate polygon to align with axes
+    3. Generate regular grid in rotated space
+    4. Filter points inside/touching the polygon
+    5. Rotate points back to original orientation
+
+    Args:
+        polygon: Shapely Polygon in LV95 coordinates
+        voxel_size: Grid cell size in meters (default 1.0)
+
+    Returns:
+        List of (x, y) tuples in LV95 coordinates
+    """
+    rotation_angle = get_building_orientation(polygon)
+
+    # Rotate polygon to align with axes
+    rotated_polygon = rotate(polygon, -rotation_angle, origin='centroid')
+
+    # Snap bounding box to grid boundaries
+    bounds = rotated_polygon.bounds
+    x_min = np.floor(bounds[0] / voxel_size) * voxel_size
+    y_min = np.floor(bounds[1] / voxel_size) * voxel_size
+    x_max = np.ceil(bounds[2] / voxel_size) * voxel_size
+    y_max = np.ceil(bounds[3] / voxel_size) * voxel_size
+
+    # Generate grid at cell centers
+    x_coords = np.arange(x_min + voxel_size / 2, x_max, voxel_size)
+    y_coords = np.arange(y_min + voxel_size / 2, y_max, voxel_size)
+
+    # Filter points inside the rotated polygon using vectorized containment
+    xx, yy = np.meshgrid(x_coords, y_coords)
+    flat_x = xx.ravel()
+    flat_y = yy.ravel()
+
+    mask = contains_xy(rotated_polygon, flat_x, flat_y)
+    inside_x = flat_x[mask]
+    inside_y = flat_y[mask]
+
+    if len(inside_x) == 0:
+        return []
+
+    # Rotate points back to original orientation (vectorized)
+    cx, cy = rotated_polygon.centroid.x, rotated_polygon.centroid.y
+    angle_rad = np.radians(rotation_angle)
+    cos_a, sin_a = np.cos(angle_rad), np.sin(angle_rad)
+
+    dx = inside_x - cx
+    dy = inside_y - cy
+    orig_x = cx + dx * cos_a - dy * sin_a
+    orig_y = cy + dx * sin_a + dy * cos_a
+
+    return list(zip(orig_x.tolist(), orig_y.tolist()))
+
+
+# ── Step 3: Tile Index, Sampling & Volume ───────────────────────────────────
 
 
 class TileIndex:
@@ -38,8 +142,9 @@ class TileIndex:
     def __init__(self, alti3d_dir, surface3d_dir):
         self.alti3d_dir = Path(alti3d_dir)
         self.surface3d_dir = Path(surface3d_dir)
-        self.tile_cache = {}
-        self._cache_order = []
+        # OrderedDict gives us real LRU semantics: move_to_end(key) on hit,
+        # popitem(last=False) to evict the oldest entry on overflow.
+        self.tile_cache: "OrderedDict[str, rasterio.DatasetReader]" = OrderedDict()
 
         log.info("Indexing available tiles...")
         self.alti3d_tiles = self._index_tiles(self.alti3d_dir)
@@ -65,33 +170,25 @@ class TileIndex:
             return tile_index
 
         for filepath in directory.glob("*.tif"):
-            try:
-                parts = filepath.stem.split('_')
-                if len(parts) >= 3:
-                    tile_id = parts[2]
-                    if '-' in tile_id and len(tile_id.split('-')) == 2:
-                        tile_index[tile_id] = filepath
-                    else:
-                        log.debug(f"Unexpected tile ID format in {filepath.name}")
-            except Exception as e:
-                log.debug(f"Could not parse tile from {filepath.name}: {e}")
+            parts = filepath.stem.split('_')
+            if len(parts) < 3:
+                log.debug("Unexpected filename layout: %s", filepath.name)
+                continue
+            tile_id = parts[2]
+            if '-' not in tile_id or len(tile_id.split('-')) != 2:
+                log.debug("Unexpected tile ID format in %s", filepath.name)
+                continue
+            tile_index[tile_id] = filepath
 
         return tile_index
 
     def _open_tile(self, cache_key, tile_path):
-        """Open a tile and manage cache eviction."""
+        """Open a tile, evicting the least-recently-used entry when full."""
         if len(self.tile_cache) >= MAX_CACHED_TILES:
-            evict_key = self._cache_order.pop(0)
-            if evict_key in self.tile_cache:
-                self.tile_cache[evict_key].close()
-                del self.tile_cache[evict_key]
+            _, evicted = self.tile_cache.popitem(last=False)
+            evicted.close()
 
         self.tile_cache[cache_key] = rasterio.open(tile_path)
-        self._cache_order.append(cache_key)
-
-    def get_required_tiles(self, bounds):
-        """Get list of tile IDs covering a bounding box in LV95 coordinates."""
-        return sorted(tile_ids_from_bounds(bounds))
 
     def sample_heights(self, points, tiles, model_type):
         """
@@ -122,9 +219,12 @@ class TileIndex:
                     continue
                 try:
                     self._open_tile(cache_key, tile_path)
-                except Exception as e:
-                    log.debug(f"Could not open {tile_path}: {e}")
+                except (rasterio.errors.RasterioIOError, OSError) as e:
+                    log.debug("Could not open %s: %s", tile_path, e)
                     continue
+            else:
+                # Cache hit — refresh LRU position
+                self.tile_cache.move_to_end(cache_key)
 
             src = self.tile_cache[cache_key]
 
@@ -170,33 +270,61 @@ class TileIndex:
 
                 heights[indices[valid]] = values[valid]
 
-            except Exception as e:
-                log.debug(f"Error sampling from {tile_id}: {e}")
+            except (rasterio.errors.RasterioIOError, ValueError, IndexError) as e:
+                log.debug("Error sampling from %s: %s", tile_id, e)
 
         return heights
-
-    def add_tiles(self, directory, model_type):
-        """Incrementally index new tiles from a directory without full rescan."""
-        tile_index = self.alti3d_tiles if model_type == 'alti3d' else self.surface3d_tiles
-        new_count = 0
-        for filepath in Path(directory).glob("*.tif"):
-            try:
-                parts = filepath.stem.split('_')
-                if len(parts) >= 3:
-                    tile_id = parts[2]
-                    if '-' in tile_id and tile_id not in tile_index:
-                        tile_index[tile_id] = filepath
-                        new_count += 1
-            except (OSError, ValueError):
-                pass
-        return new_count
 
     def close(self):
         """Close all cached raster files."""
         for src in self.tile_cache.values():
             src.close()
         self.tile_cache.clear()
-        self._cache_order.clear()
+
+
+def make_empty_volume_result(av_egid=None, fid=None,
+                             area_footprint_m2=None, area_official_m2=None,
+                             status_step3=None, warnings=''):
+    """
+    Build a result row with no measurements — used both as the base for
+    successful runs (mutated below) and standalone for skipped buildings
+    (e.g. no footprint after Step 1). Missing measurements are NaN, never
+    zero, so downstream aggregations skip them correctly.
+
+    The ``warnings`` field is a ``';'``-joined string that accumulates
+    notes across pipeline steps (multi-polygon EGID, GWR lookup miss, etc.).
+
+    Keep this in sync with the keys returned by calculate_building_volume.
+    """
+    result = {
+        'av_egid': av_egid,
+        'fid': fid,
+        'area_footprint_m2': area_footprint_m2,
+        'area_official_m2': area_official_m2,
+        'volume_above_ground_m3': np.nan,
+        'elevation_base_min_m': np.nan,
+        'elevation_base_mean_m': np.nan,
+        'elevation_base_max_m': np.nan,
+        'elevation_roof_min_m': np.nan,
+        'elevation_roof_mean_m': np.nan,
+        'elevation_roof_max_m': np.nan,
+        'height_mean_m': np.nan,
+        'height_max_m': np.nan,
+        'height_minimal_m': np.nan,
+        'grid_points_count': 0,
+        'warnings': warnings or '',
+    }
+    if status_step3 is not None:
+        result['status_step3'] = status_step3
+    return result
+
+
+def append_warning(result, message):
+    """Append a warning message to a result row's ``warnings`` column."""
+    if not message:
+        return
+    existing = result.get('warnings', '') or ''
+    result['warnings'] = f'{existing}; {message}' if existing else message
 
 
 def calculate_building_volume(polygon, tile_index, av_egid=None, fid=None,
@@ -219,24 +347,11 @@ def calculate_building_volume(polygon, tile_index, av_egid=None, fid=None,
         Dict with volume, height metrics, and status
     """
     footprint_area = polygon.area
-
-    empty_result = {
-        'av_egid': av_egid,
-        'fid': fid,
-        'area_footprint_m2': round(footprint_area, 2),
-        'area_official_m2': area_official_m2,
-        'volume_above_ground_m3': 0,
-        'elevation_base_min_m': np.nan,
-        'elevation_base_mean_m': np.nan,
-        'elevation_base_max_m': np.nan,
-        'elevation_roof_min_m': np.nan,
-        'elevation_roof_mean_m': np.nan,
-        'elevation_roof_max_m': np.nan,
-        'height_mean_m': 0,
-        'height_max_m': 0,
-        'height_minimal_m': 0,
-        'grid_points_count': 0,
-    }
+    empty_result = make_empty_volume_result(
+        av_egid=av_egid, fid=fid,
+        area_footprint_m2=round(footprint_area, 2),
+        area_official_m2=area_official_m2,
+    )
 
     try:
         # Step 2: Create aligned grid
@@ -245,8 +360,8 @@ def calculate_building_volume(polygon, tile_index, av_egid=None, fid=None,
         if len(grid_points) == 0:
             return {**empty_result, 'status_step3': 'no_grid_points'}
 
-        # Determine required tiles
-        tiles = tile_index.get_required_tiles(polygon.bounds)
+        # Determine required tiles (sorted for deterministic logging order)
+        tiles = sorted(tile_ids_from_bounds(polygon.bounds))
 
         # Sample elevations
         terrain_heights = tile_index.sample_heights(grid_points, tiles, 'alti3d')
@@ -303,6 +418,9 @@ def calculate_building_volume(polygon, tile_index, av_egid=None, fid=None,
             'status_step3': 'success',
         }
 
-    except Exception as e:
-        log.debug(f"Error processing building (av_egid={av_egid}, FID={fid}): {e}")
-        return {**empty_result, 'status_step3': 'error'}
+    except (rasterio.errors.RasterioIOError, ValueError, IndexError, ArithmeticError) as e:
+        log.debug(
+            "Error processing building (av_egid=%s, FID=%s): %s: %s",
+            av_egid, fid, type(e).__name__, e,
+        )
+        return {**empty_result, 'status_step3': f'error:{type(e).__name__}'}

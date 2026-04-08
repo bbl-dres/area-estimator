@@ -109,17 +109,17 @@ data/
 flowchart TD
     subgraph INPUT["Inputs"]
         A1A["🔴 --footprints<br>AV GeoPackage / Shapefile / GeoJSON<br><i>required</i>"]
-        A1B["⚪ --coordinates<br>CSV: id, lon, lat<br><i>optional — enables spatial join mode</i>"]
+        A1B["⚪ --csv<br>CSV: id, egid (default)<br>or id, lon, lat (with --use-coordinates)<br><i>optional</i>"]
         A2["🔴 --alti3d<br>swissALTI3D tiles — terrain DTM 0.5m<br><i>required</i>"]
         A3["🔴 --surface3d<br>swissSURFACE3D tiles — surface DSM 0.5m<br><i>required</i>"]
     end
 
     A1A --> S1
-    A1B -.->|"--coordinates"| S1
+    A1B -.->|"--csv"| S1
     A2 --> S3
     A3 --> S3
 
-    S1["<b>Step 1 — Read Footprints</b><br>Mode A: all AV buildings<br>Mode B: spatial join → one AV polygon per CSV point<br>Unmatched points → status: no_footprint"]
+    S1["<b>Step 1 — Read Footprints</b><br>Mode A: all AV buildings<br>Mode B: EGID match against GWR_EGID (default)<br>Mode C: lon/lat spatial join (--use-coordinates)<br>Unmatched → status: no_footprint"]
     S2["<b>Step 2 — Aligned Grid</b><br>Minimum rotated rectangle orientation<br>Grid points filtered to footprint"]
     S3["<b>Step 3 — Volume & Heights</b><br>Sample DTM + DSM at each point<br>Volume = Σ max(surface_i − min(terrain), 0) × cell_area"]
     S4["<b>Step 4 — Floor Areas</b><br>GWR classification → floor height<br>Floors = height_minimal / floor_height<br>GFA = footprint × floors"]
@@ -161,7 +161,8 @@ flowchart TD
 |----------|:--------:|-------------|
 | **Input** | | |
 | `--footprints FILE` | yes | Geodata file with building polygons (GeoPackage, Shapefile, or GeoJSON from AV). Alone: processes all buildings in the file. |
-| `--coordinates FILE` | no | CSV with `id`, `lon`, `lat` columns (WGS84); optionally `egid` (reference only). When provided, performs a strict spatial join — only AV buildings containing a CSV point are processed. Points with no matching polygon are reported as `no_footprint` and skipped. No fallbacks. |
+| `--csv FILE` | no | CSV input file. **Default mode:** columns `id`, `egid` — each EGID is matched against `GWR_EGID` in the AV file via a single push-down query (one I/O for the whole batch, fast). With `--use-coordinates`: columns `id`, `lon`, `lat` — performs a strict point-in-polygon spatial join instead. Comma- and semicolon-delimited CSVs are both accepted. Unmatched rows are reported as `no_footprint`. |
+| `--use-coordinates` | no | Switch `--csv` from EGID match to lon/lat spatial join. Required only for buildings that have no EGID assigned in the cadastral data. |
 | **Elevation data** | | |
 | `--alti3d DIR` | yes | Directory with swissALTI3D GeoTIFF tiles |
 | `--surface3d DIR` | yes | Directory with swissSURFACE3D GeoTIFF tiles |
@@ -170,10 +171,10 @@ flowchart TD
 | `-o, --output FILE` | | Output CSV file path (default: `data/output/result_<timestamp>.csv`) |
 | **Filters** | | |
 | `-l, --limit N` | | Process only the first N buildings |
-| `-b, --bbox MIN_LON MIN_LAT MAX_LON MAX_LAT` | | Bounding box filter in WGS84 (only in all-buildings mode, i.e. without `--coordinates`) |
+| `-b, --bbox MIN_LON MIN_LAT MAX_LON MAX_LAT` | | Bounding box filter in WGS84 (only in all-buildings mode, i.e. without `--csv`) |
 | **Area estimation** (off by default) | | |
 | `--estimate-area` | | Enable Step 4: floor area estimation |
-| `--gwr-csv FILE` | | GWR CSV from [housing-stat.ch](https://www.housing-stat.ch/de/data/supply/public.html); if omitted, uses swisstopo API |
+| `--gwr-csv FILE` | | GWR CSV from [housing-stat.ch](https://www.housing-stat.ch/de/data/supply/public.html); if omitted, uses swisstopo API (one call per building) |
 
 ### Setup
 
@@ -184,16 +185,25 @@ pip install -r python/requirements.txt
 ### Examples
 
 ```bash
-# Portfolio list against AV footprints (spatial join)
+# Portfolio list by EGID (default — accepts the same CSV as the web app)
 python python/main.py \
     --footprints "D:\AV_lv95\av_2056.gpkg" \
-    --coordinates my_buildings.csv \
+    --csv data/example.csv \
     --alti3d "D:\SwissAlti3D" \
     --surface3d "D:\swissSURFACE3D Raster" \
-    --auto-fetch \
+    --estimate-area \
     -o portfolio_volumes.csv
 
-# All buildings in Switzerland
+# Same input via lon/lat spatial join (for buildings without an EGID in AV)
+python python/main.py \
+    --footprints "D:\AV_lv95\av_2056.gpkg" \
+    --csv my_buildings_with_coords.csv \
+    --use-coordinates \
+    --alti3d "D:\SwissAlti3D" \
+    --surface3d "D:\swissSURFACE3D Raster" \
+    -o portfolio_volumes.csv
+
+# All buildings in Switzerland with bulk GWR for floor areas
 python python/main.py \
     --footprints data/av/ch_av_2056.gpkg \
     --alti3d /data/swisstopo/swissalti3d \
@@ -201,10 +211,10 @@ python python/main.py \
     --estimate-area --gwr-csv data/gwr/buildings.csv \
     -o results/ch_all_buildings.csv
 
-# Quick test with auto-fetch (no local data needed)
+# Quick test with auto-fetch (no local elevation data needed)
 python python/main.py \
     --footprints data/av/ch_av_2056.gpkg \
-    --coordinates my_buildings.csv \
+    --csv data/example.csv \
     --alti3d data/swissalti3d \
     --surface3d data/swisssurface3d \
     --auto-fetch \
@@ -219,10 +229,15 @@ All results are written to a single CSV file (`result_<timestamp>.csv`).
 
 ### Step 1 — Footprints
 
-Two modes, automatically selected based on which flags are provided:
+Three modes, automatically selected based on which flags are provided:
 
-- **AV only** (`--footprints`): Loads all building polygons from the geodata file and filters to buildings (`Art = Gebaeude`). Converts to LV95 if needed. The `egid` column is renamed to `av_egid`; each feature gets a `fid`.
-- **AV + CSV** (`--footprints` + `--coordinates`): Strict spatial join — each CSV point must fall within an AV building polygon. No fallbacks. Rows with no match get `status_step1 = no_footprint` and are skipped.
+- **AV only** (`--footprints`): Loads all building polygons from the geodata file and filters to buildings (`Art = Gebaeude`). Converts to LV95 if needed. The `GWR_EGID` column is renamed to `av_egid`; each feature gets an `fid`.
+- **AV + CSV by EGID** (`--footprints` + `--csv`, default): Each input row's `egid` is matched against `GWR_EGID` in the AV file via a single push-down query — fast and unambiguous. If one EGID matches multiple AV polygons (e.g. a building split across cadastral parcels), all matches are emitted as separate output rows and flagged in the `warnings` column. EGIDs not present in AV get `status_step1 = no_footprint`. Non-numeric or zero EGIDs get `status_step1 = invalid_egid`. **This is the same input format the web app uses** — `data/example.csv` works in both tools.
+- **AV + CSV by lon/lat** (`--footprints` + `--csv` + `--use-coordinates`): Strict point-in-polygon spatial join. Slower but works for buildings that have no EGID assigned in the cadastral data. Points with no matching polygon get `status_step1 = no_footprint`.
+
+> **AV vs GWR:** AV (Amtliche Vermessung) is the cadastral survey — it provides parcel and building geometry. GWR (Gebäude- und Wohnungsregister) provides building master data: addresses, classification, construction year, dwelling counts. The `GWR_EGID` column on AV polygons is the link between the two registers. EGID match (mode B) is the natural key, but a few percent of AV building polygons have no EGID assigned, which is why coordinate-based matching is kept as an option.
+
+All three modes produce a `warnings` column in the output that accumulates data-quality notes (multi-polygon matches, default-class fallbacks for floor heights, etc.) — empty strings when nothing to report.
 
 ### Step 2 — Aligned Grid
 
@@ -261,11 +276,13 @@ Estimates gross floor area by dividing building height by a typical floor height
 | `gklas` | GWR building class code (e.g. 1110 = Single-family house) |
 | `gbauj` | Construction year |
 | `gastw` | Number of stories (from register) |
-| `floor_height_used` | Floor height used for estimation (m) |
+| `floor_height_used_m` | Floor height used for estimation (m) |
+| `floor_height_source` | Where the floor height came from: `GKLAS` (specific class), `GKAT` (broader category), or `DEFAULT` (no GWR class match — appended to `warnings`) |
 | `floors_estimated` | Estimated floors: `height_minimal ÷ floor_height`, capped at GWR `gastw` if available |
 | `area_floor_total_m2` | Gross floor area: `footprint × estimated floors` (m²) |
 | `area_accuracy` | `high` (±10–15%) / `medium` (±15–25%) / `low` (±25–40%) |
 | `building_type` | Human-readable building type |
+| `warnings` | `;`-joined data-quality notes accumulated across all four steps (empty when nothing to report) |
 
 ---
 
