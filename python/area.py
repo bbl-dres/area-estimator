@@ -30,7 +30,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
 
-from volume import append_warning
+from volume import (
+    STATUS_NO_FOOTPRINT,
+    STATUS_NO_VOLUME,
+    STATUS_SUCCESS,
+    append_warning,
+)
 
 log = logging.getLogger(__name__)
 
@@ -103,10 +108,9 @@ ACCURACY_HIGH = 'high'       # ±10-15% — residential
 ACCURACY_MEDIUM = 'medium'   # ±15-25% — commercial/office
 ACCURACY_LOW = 'low'         # ±25-40% — industrial, special, missing
 
-# Step 4 status codes
-STATUS_SUCCESS = 'success'
-STATUS_NO_FOOTPRINT = 'no_footprint'
-STATUS_NO_VOLUME = 'no_volume'
+# Step 4-specific status (composed from area.py constants — the others
+# are imported from volume.py at the top of this module so the test
+# imports `from area import STATUS_SUCCESS` keep working as a re-export).
 STATUS_HEIGHT_EXCEEDS_CAP = f'height_exceeds_{HEIGHT_SANITY_CAP_M}m'
 
 
@@ -160,23 +164,89 @@ def get_floor_height(gkat, gklas):
             'DEFAULT', entry[5])
 
 
-# Building-class buckets used by determine_accuracy. Pulled out of the
-# function so they're greppable and easy to extend.
-_ACCURACY_RESIDENTIAL_GKAT = {1020}
-_ACCURACY_COMMERCIAL_GKLAS = {1220, 1230, 1231, 1263, 1264}
-_ACCURACY_INDUSTRIAL_GKLAS = {1251, 1252, 1265, 1272}
-_ACCURACY_INDUSTRIAL_GKAT = {1060, 1080}
+# ── Per-GWR-code accuracy buckets ───────────────────────────────────────────
+#
+# Derived from the validation study at docs/Height Assumptions.md, which
+# assigns a 5-level qualitative confidence (High / Medium-High / Medium /
+# Low-Medium / Low) to each GWR code based on regulatory anchors (ArGV4,
+# cantonal building codes), normative standards (SIA 2024, SIA 380/1),
+# and construction practice. We collapse the 5 levels into our 3-level
+# bucket *conservatively* — only the study's "High" maps to our `high`,
+# and any "Low" or "Low-Medium" maps to `low`. The "Medium-High" and
+# "Low-Medium" half-steps both round toward the middle. This makes
+# `high` trustworthy and `low` inclusive.
+#
+# Every code in FLOOR_HEIGHT_LOOKUP has an entry below — verified by
+# tests/test_area.py::test_accuracy_dicts_cover_every_lookup_code.
+# Codes outside this list (e.g. a future GWR revision) fall through to
+# the catch-all in determine_accuracy().
+
+_ACCURACY_BY_GKLAS = {
+    # Residential 11xx — High confidence (best-supported in the study)
+    1110: ACCURACY_HIGH,    # Single-family house        — High
+    1121: ACCURACY_HIGH,    # Two-family house           — High
+    1122: ACCURACY_HIGH,    # Multi-family house         — High
+    1130: ACCURACY_MEDIUM,  # Community residential      — Medium-High
+
+    # Hotels / Tourism
+    1211: ACCURACY_MEDIUM,  # Hotel                      — Medium
+    1212: ACCURACY_MEDIUM,  # Short-term accommodation   — Medium
+
+    # Commercial / Office
+    1220: ACCURACY_MEDIUM,  # Office building            — Medium-High
+    1230: ACCURACY_MEDIUM,  # Wholesale and retail       — Medium
+    1231: ACCURACY_MEDIUM,  # Restaurants and bars       — Medium
+    1241: ACCURACY_LOW,     # Stations and terminals     — Low-Medium
+    1242: ACCURACY_MEDIUM,  # Parking garages            — Medium
+
+    # Industrial
+    1251: ACCURACY_MEDIUM,  # Industrial building        — Medium-High (ArGV4 anchors lower bound)
+    1252: ACCURACY_LOW,     # Tanks, silos, warehouses   — Low-Medium
+
+    # Cultural / Public
+    1261: ACCURACY_LOW,     # Culture and leisure        — Low-Medium
+    1262: ACCURACY_LOW,     # Museums and libraries      — Low-Medium
+    1263: ACCURACY_HIGH,    # Schools and universities   — High (well-supported)
+    1264: ACCURACY_MEDIUM,  # Hospitals and clinics      — Medium-High
+    1265: ACCURACY_MEDIUM,  # Sports halls               — Medium
+
+    # Special / Heritage
+    1271: ACCURACY_LOW,     # Agricultural buildings     — Low-Medium
+    1272: ACCURACY_LOW,     # Churches and religious     — Low (range too narrow for naves)
+    1273: ACCURACY_LOW,     # Monuments and protected    — Low (heterogeneous by definition)
+    1274: ACCURACY_LOW,     # Other structures           — Low (catch-all)
+}
+
+_ACCURACY_BY_GKAT = {
+    1010: ACCURACY_MEDIUM,  # Provisional shelter            — Medium
+    1020: ACCURACY_HIGH,    # Residential single-house parent — High (residential)
+    1030: ACCURACY_HIGH,    # Residential w/ secondary use   — High (well-anchored in regulation)
+    1040: ACCURACY_MEDIUM,  # Partially residential          — Medium-High
+    1060: ACCURACY_MEDIUM,  # Non-residential                — Medium
+    1080: ACCURACY_LOW,     # Special-purpose                — Low-Medium
+}
 
 
 def determine_accuracy(gkat, gklas, has_volume, has_footprint, floor_height_source=None):
     """
     Determine accuracy bucket from data quality and building type.
 
-    If ``floor_height_source == 'DEFAULT'`` the floor-height lookup fell
-    through to the residential default, meaning we have no class match for
-    this building. Force LOW accuracy in that case so the output is honest
-    about the uncertainty (and consistent with the warning that
-    ``estimate_floor_area`` appends in the same path).
+    Lookup priority matches ``get_floor_height``: GKLAS (specific class)
+    is consulted first, then GKAT (broader category), then a catch-all.
+
+    Two failure-mode short-circuits at the top:
+
+    - If volume or footprint is missing, return LOW (nothing to be confident about).
+    - If ``floor_height_source == 'DEFAULT'`` the floor-height lookup fell
+      through to the residential default — i.e. the GWR code wasn't in
+      ``FLOOR_HEIGHT_LOOKUP``. Return LOW so the output is honest about
+      the uncertainty (and consistent with the warning that
+      ``estimate_floor_area`` appends in the same path).
+    - If both gkat and gklas are missing, return LOW.
+
+    Per-code mappings come from ``_ACCURACY_BY_GKLAS`` / ``_ACCURACY_BY_GKAT``,
+    which are derived from the validation study at
+    ``docs/Height Assumptions.md``.
     """
     if not has_volume or not has_footprint:
         return ACCURACY_LOW
@@ -189,18 +259,16 @@ def determine_accuracy(gkat, gklas, has_volume, has_footprint, floor_height_sour
     if gkat_int is None and gklas_int is None:
         return ACCURACY_LOW
 
-    # Residential — best accuracy. GKLAS 11xx is residential per GWR catalog.
-    if gkat_int in _ACCURACY_RESIDENTIAL_GKAT or (
-        gklas_int is not None and 1100 <= gklas_int < 1200
-    ):
-        return ACCURACY_HIGH
+    # GKLAS is more specific — try it first
+    if gklas_int in _ACCURACY_BY_GKLAS:
+        return _ACCURACY_BY_GKLAS[gklas_int]
 
-    if gklas_int in _ACCURACY_COMMERCIAL_GKLAS:
-        return ACCURACY_MEDIUM
+    if gkat_int in _ACCURACY_BY_GKAT:
+        return _ACCURACY_BY_GKAT[gkat_int]
 
-    if gklas_int in _ACCURACY_INDUSTRIAL_GKLAS or gkat_int in _ACCURACY_INDUSTRIAL_GKAT:
-        return ACCURACY_LOW
-
+    # Catch-all for codes not in the validated mapping (e.g. a future
+    # GWR revision). Medium is the safe default — neither over- nor
+    # under-promising on something we haven't characterised.
     return ACCURACY_MEDIUM
 
 

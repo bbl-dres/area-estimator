@@ -1,0 +1,5 @@
+# Development / test dependencies
+# Runtime deps live in requirements.txt
+-r requirements.txt
+
+pytest>=7.0

@@ -182,6 +182,17 @@ flowchart TD
 pip install -r python/requirements.txt
 ```
 
+### Tests
+
+The pure logic in `area.py`, `volume.py`, `footprints.py`, and the aggregation reduce in `main.py` is covered by a small `pytest` suite under [tests/](tests/). Run it with:
+
+```bash
+pip install -r python/requirements-dev.txt
+pytest tests/
+```
+
+The suite covers floor-area estimation (including the `gastw` cap, banker's-rounding fix, and DEFAULT-source accuracy), the multi-EGID/multi-polygon array aggregation, the CSV reader's BOM and delimiter handling, and the `_to_gwr_code`/`_parse_egid_cell` parsers. Network-bound paths (`query_gwr_api`, `tile_fetcher`) and raster sampling (`TileIndex.sample_heights`) are intentionally not unit-tested — they're covered by the integration runs against [data/example.csv](data/example.csv) instead.
+
 ### Examples
 
 ```bash
@@ -232,12 +243,20 @@ All results are written to a single CSV file (`result_<timestamp>.csv`).
 Three modes, automatically selected based on which flags are provided:
 
 - **AV only** (`--footprints`): Loads all building polygons from the geodata file and filters to buildings (`Art = Gebaeude`). Converts to LV95 if needed. The `GWR_EGID` column is renamed to `av_egid`; each feature gets an `fid`.
-- **AV + CSV by EGID** (`--footprints` + `--csv`, default): Each input row's `egid` is matched against `GWR_EGID` in the AV file via a single push-down query — fast and unambiguous. If one EGID matches multiple AV polygons (e.g. a building split across cadastral parcels), all matches are emitted as separate output rows and flagged in the `warnings` column. EGIDs not present in AV get `status_step1 = no_footprint`. Non-numeric or zero EGIDs get `status_step1 = invalid_egid`. **This is the same input format the web app uses** — `data/example.csv` works in both tools.
+- **AV + CSV by EGID** (`--footprints` + `--csv`, default): Each input row's `egid` is matched against `GWR_EGID` in the AV file via a single push-down query — fast and unambiguous. The cell may contain a single EGID *or* a list of EGIDs separated by **any combination of `,`, `/`, `;`, or whitespace** (real-world colleague CSVs use all of them, often mixed). Every cell goes through a cleanup pass first that collapses tabs, line breaks, NBSPs, and double spaces — so `"1234,\n5678"`, `"1234 / 5678"`, and `"1234;5678"` all parse the same way. Each EGID is looked up independently and the results are joined back to one output row per input CSV row (see "Array aggregation" below). EGIDs not present in AV get `status_step1 = no_footprint`. Cells that contain no parseable positive integer get `status_step1 = invalid_egid`. **This is the same input format the web app uses** — `data/example.csv` works in both tools.
 - **AV + CSV by lon/lat** (`--footprints` + `--csv` + `--use-coordinates`): Strict point-in-polygon spatial join. Slower but works for buildings that have no EGID assigned in the cadastral data. Points with no matching polygon get `status_step1 = no_footprint`.
 
 > **AV vs GWR:** AV (Amtliche Vermessung) is the cadastral survey — it provides parcel and building geometry. GWR (Gebäude- und Wohnungsregister) provides building master data: addresses, classification, construction year, dwelling counts. The `GWR_EGID` column on AV polygons is the link between the two registers. EGID match (mode B) is the natural key, but a few percent of AV building polygons have no EGID assigned, which is why coordinate-based matching is kept as an option.
 
-All three modes produce a `warnings` column in the output that accumulates data-quality notes (multi-polygon matches, default-class fallbacks for floor heights, etc.) — empty strings when nothing to report.
+#### Array aggregation: one output row per input row
+
+The pipeline guarantees **one output CSV row per input CSV row** (per `input_id`). When a single input row produces several intermediate sub-rows — because the cell contained multiple EGIDs (separated by any of `,`, `/`, `;`, or whitespace), or because one EGID matches multiple AV polygons — they are collapsed back to a single output row at the end of the pipeline.
+
+The collapse is **transparent, not summed**. Numeric metrics (`area_footprint_m2`, `volume_above_ground_m3`, `area_floor_total_m2`, height/elevation columns, …) become `;`-joined arrays of every sub-value when sub-rows disagree, and stay as scalars when all sub-rows agree. Identifier columns (`av_egid`, `fid`) become `;`-joined too. Empty positions in the array (e.g. `"727; ; ; 6.59; 6.54"`) mark sub-EGIDs that did not find a match in the AV file.
+
+This is a deliberate design choice: **the array form makes data-quality issues visible at the row level**, so a downstream user can fix the source CSV (split multi-EGID cells into separate rows, decide whether overlapping parcels should be merged, etc.) instead of discovering the issue much later as inflated totals. Pipeline summary stats only count the single-source rows; array rows are reported separately in the run log.
+
+Every output row carries a `warnings` column that accumulates data-quality notes from every step. See **Warning messages** below for the catalog.
 
 ### Step 2 — Aligned Grid
 
@@ -286,21 +305,46 @@ Estimates gross floor area by dividing building height by a typical floor height
 
 #### How `area_accuracy` is computed
 
-Each successful Step 4 row gets one of three buckets — `high`, `medium`, or `low` — assigned by a small decision tree that bakes in two things: (1) **how reliable the GWR class data is for this row**, and (2) **how uniform the floor heights are for that building type**. The tree is evaluated top to bottom and the first matching rule wins:
+Each successful Step 4 row gets one of three buckets — `high`, `medium`, or `low` — that captures **how trustworthy the floor-area estimate is for that building type**. The decision is data-driven: every GWR code in `FLOOR_HEIGHT_LOOKUP` has an explicit per-code bucket assignment, derived from the validation study at [docs/Height Assumptions.md](docs/Height%20Assumptions.md).
+
+The decision tree, evaluated top to bottom:
 
 | # | Condition | Result | Reason |
 |---|---|---|---|
 | 1 | Volume or footprint missing | **low** | No measurement to be confident about |
-| 2 | `floor_height_source == DEFAULT` (no GWR class match) | **low** | Falling back to 3.0 m residential default; the assumption is weak |
+| 2 | `floor_height_source == DEFAULT` (no GWR class match in `FLOOR_HEIGHT_LOOKUP`) | **low** | Fell back to the residential default (~3.0 m); the floor count is a guess |
 | 3 | Both `gkat` and `gklas` are missing | **low** | No type information at all |
-| 4 | `gkat == 1020` OR `1100 ≤ gklas < 1200` (residential) | **high** | Residential floor heights are the most uniform across the Swiss stock (~2.7–3.0 m almost everywhere). This is the best-supported category in the [Height Assumptions study](docs/Height%20Assumptions.md) |
-| 5 | `gklas ∈ {1220, 1230, 1231, 1263, 1264}` (offices, retail, restaurants, schools, hospitals) | **medium** | Tighter than industrial, looser than residential. Floor heights typically 3.3–4.2 m |
-| 6 | `gklas ∈ {1251, 1252, 1265, 1272}` OR `gkat ∈ {1060, 1080}` (industrial, silos, sports halls, churches, non-residential, special-purpose) | **low** | Floor heights legitimately span 4–7 m or more — high real-world variance, low confidence in any single estimate |
-| 7 | Anything else | **medium** | Catch-all for codes not explicitly listed (hotels, parking garages, agricultural, museums, etc.) |
+| 4 | `gklas` is in [`_ACCURACY_BY_GKLAS`](python/area.py) | the dict's value | Per-code bucket from the validation study, mapped 5→3 levels conservatively |
+| 5 | `gkat` is in [`_ACCURACY_BY_GKAT`](python/area.py) | the dict's value | Same, broader category fallback |
+| 6 | Anything else (e.g. a future GWR revision not in the dicts) | **medium** | Safe catch-all — neither over- nor under-promising on something we haven't characterised |
 
-The percentage tolerances (`±10–15%`, etc.) are estimated confidence intervals based on the Seiler & Seiler 2020 methodology and Swiss regulatory anchors. They are not measured against ground-truth drawings — see [docs/Height Assumptions.md](docs/Height%20Assumptions.md) for the full validation study, including a per-GWR-code confidence assessment from independent regulatory sources (ArGV4, SIA 2024, cantonal building codes).
+The per-code dicts map every code in `FLOOR_HEIGHT_LOOKUP` to one of the three buckets, with the validation study's qualitative confidence as the source of truth:
 
-> **Note:** The decision tree above is a 3-level simplification of the 5-level qualitative scale (`Low / Low-Medium / Medium / Medium-High / High`) used in the validation study. The two are not perfectly aligned — see the study for the per-code breakdown if you need finer granularity than `low/medium/high`.
+| Bucket | Source confidence (study) | GWR codes |
+|---|---|---|
+| **high** | High | `1020` GKAT (Residential single-house), `1030` GKAT (Residential w/ secondary use), `1110` SFH, `1121` Two-family, `1122` MFH, `1263` Schools and universities |
+| **medium** | Medium-High *or* Medium | `1010` Provisional shelter, `1040` Partially residential, `1060` Non-residential, `1130` Community residential, `1211` Hotel, `1212` Short-term accommodation, `1220` Office, `1230` Retail, `1231` Restaurants, `1242` Parking garages, `1251` Industrial, `1264` Hospitals, `1265` Sports halls |
+| **low** | Low *or* Low-Medium | `1080` Special-purpose, `1241` Stations and terminals, `1252` Tanks/silos/warehouses, `1261` Culture and leisure, `1262` Museums and libraries, `1271` Agricultural, `1272` Churches and religious, `1273` Monuments and protected, `1274` Other structures |
+
+When both `gklas` and `gkat` are present, **GKLAS wins** (more specific). The percentage tolerances (`±10–15%`, etc.) are estimated confidence intervals from the Seiler & Seiler 2020 methodology and Swiss regulatory anchors — they are *not* measured against ground-truth drawings. See [docs/Height Assumptions.md](docs/Height%20Assumptions.md) for the full validation study, including the per-code rationale and the original 5-level qualitative scale this 3-bucket simplification is derived from.
+
+> **Note:** The 5→3 mapping is **conservative**: only the study's `High` maps to our `high`, and any `Low` or `Low-Medium` maps to `low`. The half-steps `Medium-High` and `Low-Medium` both round toward the middle. This makes `high` trustworthy and `low` inclusive — better to under-promise than over-promise on a single-number bucket.
+
+#### Warning messages
+
+The `warnings` column accumulates `;`-joined data-quality notes from every pipeline step. An empty cell means nothing to report. Most warnings come from Step 1 (input parsing and AV matching); Step 4 adds one more for the GWR-class fallback; the aggregation step at the end of the pipeline appends a final note when more than one sub-row contributed to an output row.
+
+| Step | Warning text (template) | What it means | What to do |
+|---|---|---|---|
+| Step 1 | `EGID could not be parsed as a positive integer: '<raw>'` | The `egid` cell contained no parseable positive integer at all — typically free text, a zero/negative value, or a token that mixes letters with digits. Row gets `status_step1=invalid_egid` and is skipped by Steps 2-4. | Fix the source CSV. Single integer or any-separator list of positive integers is fine; raw text is not. |
+| Step 1 | `Input cell contained N EGIDs: 1234, 5678` | The cell contained multiple EGIDs separated by `,`, `/`, `;`, whitespace, or any combination. Each was looked up independently in AV and then aggregated back to one output row. | Splitting multi-EGID cells into separate input rows (one EGID per row) gives cleaner output and avoids the `;`-joined array form in the result. |
+| Step 1 | `EGID 1234567 matched N AV polygons` | One EGID appears as multiple polygon records in the AV cadastral data — typically a building split across cadastral parcels. Each polygon was processed individually and aggregated. | Usually nothing — this is a real cadastral situation. The aggregated row's numeric columns will be `;`-joined arrays showing every sub-polygon's value. |
+| Step 1 | `Point fell inside N AV polygons — emitting one row per polygon` | Only in `--use-coordinates` mode: the lon/lat point landed inside multiple AV polygons. | Verify the input coordinate. Overlapping AV polygons usually indicate slivers or duplicates in the cadastral data. |
+| Step 4 | `no GWR class match — using default floor height` | The building's `gkat`/`gklas` codes weren't found in the floor-height lookup table, so the residential default (≈3.0 m) was applied. This forces `area_accuracy = low`. | Indicative — area estimation is unreliable for this row. May indicate a GWR code newer than the lookup table or a building type the lookup doesn't cover. |
+| Aggregation | `aggregated N sub-rows from M distinct EGIDs (numeric columns are ;-joined arrays — fix the input CSV to one EGID per row)` | The input row had multi-EGID content (parsed N sub-EGIDs, M of which actually matched in AV); the output row's numeric columns are `;`-joined arrays. | Fix the source CSV: one EGID per row. The arrays in the output show exactly which sub-EGIDs contributed. |
+| Aggregation | `aggregated N AV polygons for one EGID (numeric columns are ;-joined arrays — building is split across cadastral parcels)` | A single EGID matches N polygons in AV (split across parcels). The numeric columns become `;`-joined arrays so each parcel's value is visible. | Usually nothing — this is structural to the cadastral data. Sum the array values yourself if you need a building total. |
+
+When more than one warning fires for the same row, they are concatenated with `; ` separators in the order Step 1 → Step 4 → Aggregation.
 
 ---
 

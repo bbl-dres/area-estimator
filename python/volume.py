@@ -39,6 +39,40 @@ log = logging.getLogger(__name__)
 MAX_CACHED_TILES = 200
 
 
+# ── Pipeline status code constants ──────────────────────────────────────────
+#
+# These live here because volume.py is the de-facto shared-definitions
+# module (it already exports make_empty_volume_result and append_warning
+# to area.py and main.py). Centralising them here means there is exactly
+# one place to look up "what valid status strings exist", and a typo in
+# any consumer becomes an ImportError instead of a silent string mismatch.
+#
+# The dynamic prefixes (STATUS_ERROR_PREFIX, STATUS_SKIPPED_PREFIX) are
+# composed at the call site, e.g. f"{STATUS_ERROR_PREFIX}{type(e).__name__}"
+# yields "error:RasterioIOError".
+
+# Step 1 (footprints.py)
+STATUS_OK = "ok"
+STATUS_INVALID_EGID = "invalid_egid"
+STATUS_NO_FOOTPRINT = "no_footprint"
+
+# Step 3 (volume.py)
+STATUS_SUCCESS = "success"
+STATUS_NO_GRID_POINTS = "no_grid_points"
+STATUS_NO_HEIGHT_DATA = "no_height_data"
+STATUS_ERROR_PREFIX = "error:"
+
+# Step 4 (area.py) — re-uses STATUS_SUCCESS and STATUS_NO_FOOTPRINT
+STATUS_NO_VOLUME = "no_volume"
+# STATUS_HEIGHT_EXCEEDS_CAP lives in area.py because its value depends on
+# the HEIGHT_SANITY_CAP_M constant defined there.
+
+# main.py — composed by main.py to flag rows that didn't make it through
+# Step 3 successfully (e.g. "skipped:invalid_egid", "skipped:no_footprint")
+STATUS_SKIPPED = "skipped"
+STATUS_SKIPPED_PREFIX = "skipped:"
+
+
 # ── Step 2: Aligned Grid ────────────────────────────────────────────────────
 
 
@@ -358,7 +392,7 @@ def calculate_building_volume(polygon, tile_index, av_egid=None, fid=None,
         grid_points = create_aligned_grid_points(polygon, voxel_size)
 
         if len(grid_points) == 0:
-            return {**empty_result, 'status_step3': 'no_grid_points'}
+            return {**empty_result, 'status_step3': STATUS_NO_GRID_POINTS}
 
         # Determine required tiles (sorted for deterministic logging order)
         tiles = sorted(tile_ids_from_bounds(polygon.bounds))
@@ -374,7 +408,7 @@ def calculate_building_volume(polygon, tile_index, av_egid=None, fid=None,
 
         if len(valid_terrain) == 0:
             return {**empty_result, 'grid_points_count': len(grid_points),
-                    'status_step3': 'no_height_data'}
+                    'status_step3': STATUS_NO_HEIGHT_DATA}
 
         # Terrain (base) elevation statistics
         base_min = np.min(valid_terrain)
@@ -415,7 +449,7 @@ def calculate_building_volume(polygon, tile_index, av_egid=None, fid=None,
             'height_max_m': round(height_max, 2),
             'height_minimal_m': round(height_minimal, 2),
             'grid_points_count': len(valid_terrain),
-            'status_step3': 'success',
+            'status_step3': STATUS_SUCCESS,
         }
 
     except (rasterio.errors.RasterioIOError, ValueError, IndexError, ArithmeticError) as e:
@@ -423,4 +457,4 @@ def calculate_building_volume(polygon, tile_index, av_egid=None, fid=None,
             "Error processing building (av_egid=%s, FID=%s): %s: %s",
             av_egid, fid, type(e).__name__, e,
         )
-        return {**empty_result, 'status_step3': f'error:{type(e).__name__}'}
+        return {**empty_result, 'status_step3': f'{STATUS_ERROR_PREFIX}{type(e).__name__}'}

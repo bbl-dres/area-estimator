@@ -17,11 +17,18 @@ All functions return a GeoDataFrame in LV95 (EPSG:2056) with columns:
 """
 
 import logging
+import re
 from pathlib import Path
 
 import geopandas as gpd
 import pandas as pd
 from shapely.geometry import Point
+
+from volume import (
+    STATUS_INVALID_EGID,
+    STATUS_NO_FOOTPRINT,
+    STATUS_OK,
+)
 
 log = logging.getLogger(__name__)
 
@@ -52,7 +59,7 @@ def load_footprints_from_file(filepath, bbox=None, limit=None):
     if limit:
         gdf = gdf.head(limit)
 
-    gdf['status_step1'] = 'ok'
+    gdf['status_step1'] = STATUS_OK
     gdf['warnings'] = ''
     log.info(f"  {len(gdf)} building footprints loaded")
     return gdf[['av_egid', 'fid', 'area_official_m2', 'geometry', 'status_step1', 'warnings']]
@@ -123,16 +130,90 @@ def _load_av_buildings(av_path, bbox_lv95=None, where_sql=None):
     return gdf[['av_egid', 'fid', 'area_official_m2', 'geometry']].reset_index(drop=True)
 
 
+# Separators accepted between EGIDs in a multi-EGID input cell. Real-world
+# CSVs use every combination of comma, slash, semicolon, and bare whitespace,
+# often mixed within a single cell. The regex accepts any run of these
+# characters as a single separator. Whitespace is included so that values
+# like "1234 5678" (space-only), "1234\n5678" (line-break, surviving past
+# csv-quoting), and "1234,\t5678" (comma + tab) all parse uniformly.
+_EGID_SEPARATOR_RE = re.compile(r'[,/;\s]+')
+
+
+def _parse_egid_cell(raw):
+    """
+    Parse a CSV ``egid`` cell into a list of valid (positive int) EGIDs.
+
+    Accepted separators between EGIDs: ``,``, ``/``, ``;``, and any
+    whitespace. They can be mixed and repeated within one cell.
+
+    - ``None`` / NaN / empty → ``[]``
+    - Single integer ("1234567") → ``[1234567]``
+    - Multi-EGID with any separator(s):
+        - "1234, 5678"     → ``[1234, 5678]``
+        - "1234 / 5678"    → ``[1234, 5678]``
+        - "1234;5678"      → ``[1234, 5678]``
+        - "1234 5678"      → ``[1234, 5678]``  (whitespace alone)
+        - "1234, 5678/9012;3456" → ``[1234, 5678, 9012, 3456]`` (mixed)
+    - Any token that's not a positive integer (including 0, negatives,
+      and non-numeric strings) poisons the whole cell → ``[]``. We
+      never silently drop part of a multi-EGID list.
+
+    Caller is responsible for the upstream cleanup pass that strips
+    line breaks and collapses internal whitespace (see ``_read_input_csv``).
+    """
+    if pd.isna(raw):
+        return []
+    s = str(raw).strip()
+    if not s:
+        return []
+
+    # Drop empty tokens that fall out of leading/trailing separators.
+    tokens = [t for t in _EGID_SEPARATOR_RE.split(s) if t]
+    if not tokens:
+        return []
+
+    result = []
+    for token in tokens:
+        try:
+            n = int(float(token))
+        except (TypeError, ValueError):
+            return []
+        if n <= 0:
+            return []
+        result.append(n)
+    return result
+
+
+def _normalise_cell(value):
+    """
+    Collapse every run of whitespace (spaces, tabs, line breaks, NBSPs)
+    to a single space and strip leading/trailing whitespace. Returns
+    NaN unchanged. Used by _read_input_csv to scrub every input cell
+    before any per-column parsing runs — the project's input CSVs come
+    from spreadsheets edited by hand and contain every kind of stray
+    whitespace imaginable.
+    """
+    if pd.isna(value):
+        return value
+    # ' '.join(str(v).split()) collapses ALL Unicode whitespace runs.
+    return ' '.join(str(value).split())
+
+
 def _read_input_csv(csv_path):
     """
-    Read a CSV with comma- or semicolon-delimiter auto-detect and BOM
-    handling.
+    Read a CSV with delimiter auto-detect, BOM handling, and a strict
+    cell-cleanup pass.
 
-    - The web app uses ``;``, the Python world expects ``,`` — accepting
-      both means a single CSV (e.g. data/example.csv) works in both tools.
+    - The web app uses ``;``, the Python world expects ``,`` — sniffer
+      auto-detect handles both so a single CSV works in both tools.
     - ``utf-8-sig`` transparently strips a UTF-8 BOM if one is present
-      (Excel and many Windows tools save CSVs with BOM by default), so the
-      first column header doesn't come through as ``\\ufeffid``.
+      (Excel and many Windows tools save CSVs with BOM by default), so
+      the first column header doesn't come through as ``\\ufeffid``.
+    - Every cell goes through ``_normalise_cell``: tabs, line breaks,
+      double spaces, and Unicode whitespace are collapsed to single
+      ASCII spaces and trimmed. This means downstream parsers (like
+      ``_parse_egid_cell``) only have to deal with clean strings, no
+      matter what mess a colleague pasted into Excel.
     """
     csv_path = Path(csv_path)
     if not csv_path.exists():
@@ -141,6 +222,12 @@ def _read_input_csv(csv_path):
     # python engine + sep=None enables csv.Sniffer auto-detection
     df = pd.read_csv(csv_path, sep=None, engine='python', encoding='utf-8-sig')
     df.columns = [c.lower().strip() for c in df.columns]
+
+    # Cleanup pass: scrub whitespace in every string cell.
+    for col in df.columns:
+        if df[col].dtype == object:
+            df[col] = df[col].map(_normalise_cell)
+
     return df
 
 
@@ -182,32 +269,37 @@ def load_footprints_from_av_with_egids(av_path, csv_path, limit=None):
 
     df = df.rename(columns={'id': 'input_id'})
     df['input_egid_raw'] = df['egid']
-    df['input_egid'] = pd.to_numeric(df['egid'], errors='coerce')
-    # Carry validity inline so the per-row loop below doesn't depend on
-    # an external boolean Series sharing the same index. Name avoids the
-    # leading underscore because pandas itertuples renames such columns
-    # to positional placeholders, breaking attribute access.
-    df['valid_egid'] = df['input_egid'].notna() & (df['input_egid'] > 0)
+    # Parse each cell into a list of valid positive ints. Length 1 for the
+    # normal case, length N for multi-EGID inputs (any of `,/;` or
+    # whitespace as separator, aggregated back to one row per input_id
+    # at the end of the pipeline), length 0 for invalid cells.
+    df['parsed_egids'] = df['egid'].apply(_parse_egid_cell)
     df = df.reset_index(drop=True)
 
-    valid_egids = sorted({int(e) for e in df.loc[df['valid_egid'], 'input_egid']})
+    # Flat union of every valid EGID across the whole CSV — a single
+    # WHERE-IN query against the AV file fetches them all at once.
+    all_egids = sorted({e for lst in df['parsed_egids'] for e in lst})
+    n_invalid = int((df['parsed_egids'].apply(len) == 0).sum())
+    n_multi_egid = int((df['parsed_egids'].apply(len) > 1).sum())
 
     log.info(
         f"Loaded {len(df)} rows from {Path(csv_path).name} "
-        f"({len(valid_egids)} unique valid EGIDs, "
-        f"{int((~df['valid_egid']).sum())} invalid)"
+        f"({len(all_egids)} unique valid EGIDs across {len(df) - n_invalid} rows, "
+        f"{n_invalid} invalid"
+        + (f", {n_multi_egid} multi-EGID" if n_multi_egid else "")
+        + ")"
     )
 
     # ── Single push-down read ─────────────────────────────────────────────
     av_by_egid: dict[int, list] = {}
-    if valid_egids:
+    if all_egids:
         # GeoPackage WHERE pushdown via pyogrio. The IN list is fine for
         # the example case (~10 EGIDs); a portfolio of 50k+ may need
         # batching, but pyogrio handles fairly large IN lists in practice.
-        where = f"GWR_EGID IN ({','.join(str(e) for e in valid_egids)})"
+        where = f"GWR_EGID IN ({','.join(str(e) for e in all_egids)})"
         log.info(
             f"Querying AV: {Path(av_path).name} "
-            f"(layer={AV_BUILDING_LAYER}, WHERE GWR_EGID IN [{len(valid_egids)} ids])"
+            f"(layer={AV_BUILDING_LAYER}, WHERE GWR_EGID IN [{len(all_egids)} ids])"
         )
         try:
             av = _load_av_buildings(av_path, where_sql=where)
@@ -229,63 +321,80 @@ def load_footprints_from_av_with_egids(av_path, csv_path, limit=None):
             av_by_egid[int(egid_val)] = list(group.itertuples(index=False))
 
     # ── Build output rows in CSV order ────────────────────────────────────
+    #
+    # Each input row produces ≥ 1 sub-rows: one per (parsed EGID × matching
+    # AV polygon). All sub-rows from the same input row share `input_id`
+    # and are aggregated back to a single output row by main.py at the
+    # end of the pipeline.
     records = []
     matched = 0
     no_match = 0
     invalid = 0
-    multi_polygon_egids = 0
+    multi_polygon_hits = 0
+    multi_egid_hits = 0
 
     for row in df.itertuples(index=False):
         input_id = row.input_id
+        egids = row.parsed_egids  # list[int]
 
-        # Invalid / missing EGID
-        if not row.valid_egid:
+        # Invalid / unparseable cell
+        if not egids:
             records.append(_egid_record(
                 input_id=input_id,
                 input_egid=row.input_egid_raw,
                 av_egid=None, fid=None, geometry=None, area_official_m2=None,
-                status='invalid_egid',
+                status=STATUS_INVALID_EGID,
                 warnings=[f'EGID could not be parsed as a positive integer: {row.input_egid_raw!r}'],
             ))
             invalid += 1
             continue
 
-        egid_int = int(row.input_egid)
-        matches = av_by_egid.get(egid_int)
-
-        if not matches:
-            records.append(_egid_record(
-                input_id=input_id, input_egid=egid_int,
-                av_egid=None, fid=None, geometry=None, area_official_m2=None,
-                status='no_footprint',
-                warnings=[],
-            ))
-            no_match += 1
-            continue
-
-        warnings = []
-        if len(matches) > 1:
-            warnings.append(
-                f'EGID matched {len(matches)} AV polygons — emitting one row per polygon'
+        # Multi-EGID input → one warning shared by every sub-row from this input row
+        base_warnings = []
+        if len(egids) > 1:
+            base_warnings.append(
+                f'Input cell contained {len(egids)} EGIDs: '
+                f'{", ".join(str(e) for e in egids)}'
             )
-            multi_polygon_egids += 1
+            multi_egid_hits += 1
 
-        for av_row in matches:
-            records.append(_egid_record(
-                input_id=input_id,
-                input_egid=egid_int,
-                av_egid=av_row.av_egid,
-                fid=av_row.fid,
-                geometry=av_row.geometry,
-                area_official_m2=av_row.area_official_m2,
-                status='ok',
-                warnings=list(warnings),
-            ))
-            matched += 1
+        for egid_int in egids:
+            matches = av_by_egid.get(egid_int)
+
+            if not matches:
+                records.append(_egid_record(
+                    input_id=input_id, input_egid=egid_int,
+                    av_egid=None, fid=None, geometry=None, area_official_m2=None,
+                    status=STATUS_NO_FOOTPRINT,
+                    warnings=list(base_warnings),
+                ))
+                no_match += 1
+                continue
+
+            sub_warnings = list(base_warnings)
+            if len(matches) > 1:
+                sub_warnings.append(
+                    f'EGID {egid_int} matched {len(matches)} AV polygons'
+                )
+                multi_polygon_hits += 1
+
+            for av_row in matches:
+                records.append(_egid_record(
+                    input_id=input_id,
+                    input_egid=egid_int,
+                    av_egid=av_row.av_egid,
+                    fid=av_row.fid,
+                    geometry=av_row.geometry,
+                    area_official_m2=av_row.area_official_m2,
+                    status=STATUS_OK,
+                    warnings=list(sub_warnings),
+                ))
+                matched += 1
 
     log.info(
         f"  Matched: {matched}  no_footprint: {no_match}  invalid_egid: {invalid}"
-        + (f"  multi-polygon EGIDs: {multi_polygon_egids}" if multi_polygon_egids else "")
+        + (f"  multi-polygon EGIDs: {multi_polygon_hits}" if multi_polygon_hits else "")
+        + (f"  multi-EGID inputs: {multi_egid_hits}" if multi_egid_hits else "")
     )
 
     return gpd.GeoDataFrame(records, crs='EPSG:2056')
@@ -390,7 +499,7 @@ def load_footprints_from_av_with_coordinates(av_path, csv_path, limit=None):
                     'fid': av_row['fid'],
                     'area_official_m2': av_row['area_official_m2'],
                     'geometry': av_row['geometry'],
-                    'status_step1': 'ok',
+                    'status_step1': STATUS_OK,
                     'warnings': '; '.join(warnings),
                 })
                 matched += 1
@@ -404,7 +513,7 @@ def load_footprints_from_av_with_coordinates(av_path, csv_path, limit=None):
                 'fid': None,
                 'area_official_m2': None,
                 'geometry': None,
-                'status_step1': 'no_footprint',
+                'status_step1': STATUS_NO_FOOTPRINT,
                 'warnings': '',
             })
             no_match += 1

@@ -25,9 +25,152 @@ from footprints import (
     load_footprints_from_av_with_egids,
     load_footprints_from_av_with_coordinates,
 )
-from volume import TileIndex, calculate_building_volume, make_empty_volume_result, append_warning
+from volume import (
+    STATUS_OK,
+    STATUS_SKIPPED,
+    STATUS_SKIPPED_PREFIX,
+    STATUS_SUCCESS,
+    TileIndex,
+    append_warning,
+    calculate_building_volume,
+    make_empty_volume_result,
+)
 from tile_fetcher import ensure_tiles, tile_ids_from_bounds
 from area import enrich_with_gwr, estimate_floor_area
+
+
+# Columns where ``;``-joining sub-row values doesn't carry information —
+# either because the value is the group key, the rolled-up status of the
+# group, or because aggregation has its own dedicated handling below.
+_AGGREGATE_PASS_THROUGH_COLS = frozenset({
+    'input_id', 'input_egid_raw',
+    'status_step1', 'status_step3', 'status_step4',
+    'warnings',
+})
+
+
+def aggregate_by_input_id(results_df):
+    """
+    Collapse sub-rows that share an ``input_id`` into one output row each.
+
+    A sub-row exists when a single CSV input row produced multiple Step 1
+    matches — either the cell contained several EGIDs (separated by any of
+    ``,`` ``/`` ``;`` or whitespace), or one EGID matched several AV
+    polygons. The aggregate represents the BBL building **with every
+    sub-building visible**:
+
+    - For each value column where the sub-rows disagree, the output row
+      contains a ``';'``-joined string of every sub-value in input order.
+    - Where every sub-row agrees on a value (e.g. all sub-buildings share
+      the same ``gkat``), the output keeps the scalar.
+    - ``warnings`` from every sub-row are concatenated and an aggregation
+      note is appended.
+    - ``status_step3`` rolls up to ``'success'`` if any sub-row succeeded,
+      otherwise the first sub-row's status.
+
+    The point of the array form is **transparency**: a downstream user
+    looking at one bbl_id row can see immediately that the EGID has 4 AV
+    polygons or that the input cell contained 5 EGIDs, and can fix the
+    source data accordingly. Sums would silently hide the multi-source
+    nature of the row.
+
+    Single-element groups pass through unchanged.
+    """
+    if 'input_id' not in results_df.columns or len(results_df) == 0:
+        return results_df
+
+    aggregated_rows = []
+    for input_id, group in results_df.groupby('input_id', sort=False, dropna=False):
+        if len(group) == 1:
+            aggregated_rows.append(group.iloc[0].to_dict())
+            continue
+        aggregated_rows.append(_reduce_group(group))
+
+    out = pd.DataFrame(aggregated_rows, columns=results_df.columns)
+
+    # When some rows are aggregated (string arrays) and others aren't
+    # (float scalars), the column becomes object dtype. Pandas then writes
+    # integer-valued floats as "1234567.0" — ugly. Demote them to int so
+    # the CSV stays clean. Strings (the array rows) pass through unchanged.
+    for col in out.columns:
+        if out[col].dtype == object:
+            out[col] = out[col].map(_demote_int_float)
+
+    return out
+
+
+def _demote_int_float(v):
+    """Convert integer-valued floats to ints; pass everything else through."""
+    if isinstance(v, float) and not pd.isna(v) and v.is_integer():
+        return int(v)
+    return v
+
+
+def _format_sub_value(v):
+    """Stringify one sub-row value for ``;``-joined arrays. Skips NaN."""
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return ''
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    return str(v)
+
+
+def _reduce_group(group):
+    """Reduce one group of sub-rows (sharing input_id) into a single dict."""
+    # Start from the first sub-row so the group key + pass-through columns
+    # land naturally in the output.
+    row = group.iloc[0].to_dict()
+
+    for col in group.columns:
+        if col in _AGGREGATE_PASS_THROUGH_COLS:
+            continue
+
+        sub_values = list(group[col])
+        # If every sub-row agrees on the value, keep the scalar form so
+        # downstream numeric ops still work for the homogeneous columns.
+        # NaN comparisons need explicit handling.
+        unique_repr = {_format_sub_value(v) for v in sub_values}
+        unique_non_empty = {r for r in unique_repr if r != ''}
+        if len(unique_non_empty) <= 1:
+            # All sub-rows agree (or all are NaN). Keep the first sub-row's
+            # value as the scalar representation.
+            continue
+
+        # Sub-rows differ → emit a ;-joined string of every sub-value.
+        row[col] = '; '.join(_format_sub_value(v) for v in sub_values)
+
+    # Status rollup: if any sub-row succeeded, the aggregate is success;
+    # otherwise the first sub-row's status (for downstream filtering).
+    if 'status_step3' in group.columns:
+        successes = group['status_step3'] == STATUS_SUCCESS
+        if successes.any():
+            row['status_step3'] = STATUS_SUCCESS
+        else:
+            row['status_step3'] = group['status_step3'].iloc[0]
+
+    # Concatenate warnings from every sub-row + an aggregation note.
+    all_warnings = []
+    for w in group['warnings']:
+        if w and isinstance(w, str):
+            for piece in w.split('; '):
+                if piece and piece not in all_warnings:
+                    all_warnings.append(piece)
+
+    n_sub_rows = len(group)
+    n_unique_egids = group['av_egid'].dropna().nunique() if 'av_egid' in group.columns else 0
+    if n_unique_egids > 1:
+        all_warnings.append(
+            f'aggregated {n_sub_rows} sub-rows from {n_unique_egids} distinct EGIDs '
+            f'(numeric columns are ;-joined arrays — fix the input CSV to one EGID per row)'
+        )
+    else:
+        all_warnings.append(
+            f'aggregated {n_sub_rows} AV polygons for one EGID '
+            f'(numeric columns are ;-joined arrays — building is split across cadastral parcels)'
+        )
+    row['warnings'] = '; '.join(all_warnings)
+
+    return row
 
 
 def setup_logging(output_path):
@@ -193,7 +336,7 @@ def main():
         return 1
 
     total = len(buildings)
-    with_geometry = buildings[buildings['status_step1'] == 'ok']
+    with_geometry = buildings[buildings['status_step1'] == STATUS_OK]
     log.info(f"  Total features:  {total}")
     log.info(f"  With footprint:  {len(with_geometry)}")
     log.info(f"  Without:         {total - len(with_geometry)}")
@@ -249,12 +392,12 @@ def main():
         for i, (_, row) in enumerate(buildings.iterrows()):
             step1_warnings = row.get('warnings') or ''
 
-            if row['status_step1'] != 'ok':
+            if row['status_step1'] != STATUS_OK:
                 result = make_empty_volume_result(
                     av_egid=row.get('av_egid'),
                     fid=row.get('fid'),
                     area_official_m2=row.get('area_official_m2'),
-                    status_step3=f"skipped:{row['status_step1']}",
+                    status_step3=f"{STATUS_SKIPPED_PREFIX}{row['status_step1']}",
                     warnings=step1_warnings,
                 )
             else:
@@ -306,18 +449,33 @@ def main():
 
         area_results = []
         for _, row in results_df.iterrows():
-            if row['status_step3'] == 'success':
+            if row['status_step3'] == STATUS_SUCCESS:
                 area_results.append(estimate_floor_area(row.to_dict()))
             else:
                 result = row.to_dict()
-                result['status_step4'] = 'skipped'
+                result['status_step4'] = STATUS_SKIPPED
                 area_results.append(result)
 
         results_df = pd.DataFrame(area_results)
 
+    # ── Aggregate sub-rows by input_id ────────────────────────────────────
+    # Multi-EGID inputs and multi-polygon AV matches both produce more
+    # than one intermediate row sharing the same input_id. Collapse them
+    # to one output row per input_id; multi-source columns become
+    # ;-joined arrays so the user can see every sub-building's value
+    # and improve the input data quality at the source.
+    n_before = len(results_df)
+    results_df = aggregate_by_input_id(results_df)
+    n_after = len(results_df)
+    if n_before != n_after:
+        log.info(f"\nAggregated {n_before} sub-rows -> {n_after} output rows by input_id")
+
     # ── Output CSV ────────────────────────────────────────────────────────
     # Reorder columns: identifiers first
-    id_cols = ["input_id", "input_egid", "input_lon", "input_lat", "av_egid", "egid", "fid"]
+    id_cols = [
+        "input_id", "input_egid", "input_lon", "input_lat",
+        "av_egid", "egid", "fid",
+    ]
     existing_id_cols = [c for c in id_cols if c in results_df.columns]
     other_cols = [c for c in results_df.columns if c not in id_cols]
     results_df = results_df[existing_id_cols + other_cols]
@@ -333,22 +491,35 @@ def main():
     log.info("SUMMARY")
     log.info("=" * 50)
 
-    successful = results_df[results_df['status_step3'] == 'success']
+    successful = results_df[results_df['status_step3'] == STATUS_SUCCESS]
     log.info(f"Successful: {len(successful)}/{len(results_df)}")
 
     if len(successful) > 0:
+        # After aggregate_by_input_id, multi-source rows have ;-joined
+        # string values in the numeric columns. Coerce to numeric so the
+        # array rows become NaN and don't crash .sum() — then report the
+        # number we excluded separately so the user knows the total is
+        # only over the single-source rows.
+        vol_numeric = pd.to_numeric(successful['volume_above_ground_m3'], errors='coerce')
+        n_array_rows = int(vol_numeric.isna().sum() - successful['volume_above_ground_m3'].isna().sum())
+        n_summable = int(vol_numeric.notna().sum())
+
         log.info(f"\nVolume:")
-        log.info(f"  Total:   {successful['volume_above_ground_m3'].sum():,.0f} m³")
-        log.info(f"  Average: {successful['volume_above_ground_m3'].mean():,.0f} m³")
+        log.info(f"  Total:   {vol_numeric.sum():,.0f} m³  (across {n_summable} single-source rows)")
+        log.info(f"  Average: {vol_numeric.mean():,.0f} m³")
+        if n_array_rows > 0:
+            log.info(f"  Note:    {n_array_rows} multi-source rows excluded from sum "
+                     f"(see ;-joined values in CSV)")
 
         if args.estimate_area and 'area_floor_total_m2' in successful.columns:
-            has_area = successful['area_floor_total_m2'].notna()
+            area_numeric = pd.to_numeric(successful['area_floor_total_m2'], errors='coerce')
+            floors_numeric = pd.to_numeric(successful['floors_estimated'], errors='coerce')
+            has_area = area_numeric.notna()
             if has_area.any():
-                area_data = successful[has_area]
                 log.info(f"\nFloor Area:")
-                log.info(f"  Total:   {area_data['area_floor_total_m2'].sum():,.0f} m²")
-                log.info(f"  Average: {area_data['area_floor_total_m2'].mean():,.0f} m²")
-                log.info(f"  Avg floors: {area_data['floors_estimated'].mean():.1f}")
+                log.info(f"  Total:   {area_numeric.sum():,.0f} m²  (across {int(has_area.sum())} single-source rows)")
+                log.info(f"  Average: {area_numeric[has_area].mean():,.0f} m²")
+                log.info(f"  Avg floors: {floors_numeric[has_area].mean():.1f}")
 
     log.info("\nStatus (Step 3):")
     for status, count in results_df['status_step3'].value_counts().items():
