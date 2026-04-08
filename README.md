@@ -223,46 +223,14 @@ area-estimator/
 
 ## Experimental tools
 
-Self-contained tools that aren't part of the main pipeline live in [experimental/](experimental/). They share data inputs (AV cadastral, swissALTI3D, swissSURFACE3D) and a few helper modules from `python/`, but are independently runnable and have their own README each.
-
-### 🏗️ Mesh Builder — watertight 3D building hulls from cadastral footprints + DSM/DTM
-
-**[experimental/mesh-builder/](experimental/mesh-builder/)**
-
-Builds **watertight LoD2-ish 3D meshes** for any building in Switzerland — given the AV polygon and the swisstopo elevation rasters this repo already consumes. It exists because [swissBUILDINGS3D 3.0](https://www.swisstopo.admin.ch/en/landscape-model-swissbuildings3d-3-0-beta), the obvious source for 3D building geometry, is **inconsistent**: some buildings are excellent, others are unusable. This tool produces the same quality on every building in the country and degrades gracefully on weird footprints (it doesn't do plane fitting, so it has none of swissBUILDINGS3D's failure modes).
-
-**What it does**
-
-- Procedural watertight mesh per building (footprint-exact wall bases, slope-following floor, DSM-derived roof)
-- **Edge-preserving two-pass smoothing** kills DSM noise: vegetation, antennas, and stalactite-causing boundary samples in the fine pass; lift overruns, stair towers, and narrow chimneys in the coarse pass
-- Output as **PLY** (default), OBJ, glTF, or STL — coordinates are in local frame with a sidecar JSON recording the LV95 origin (sidesteps trimesh's float32 precision trap)
-- **In-browser viewer** (`viewer.html`) — single-file three.js, no build step, drag-and-drop OBJ/PLY/STL/glTF, surface coloring (red roof / grey walls / dark floor), live stats panel with volume + per-class surface areas + watertight verification
-
-**Quick start**
-
-```bash
-pip install -r python/requirements.txt
-pip install -r experimental/mesh-builder/requirements.txt
-
-cd experimental/mesh-builder
-python main.py ../../data/example.csv \
-    --av <path-to-AV.gpkg> \
-    --dsm-dir <swissSURFACE3D-dir> \
-    --dtm-dir <swissALTI3D-dir> \
-    --output-dir ./out
-```
-
-Then open `viewer.html` in a browser and drag a generated `.ply` onto it.
-
-See [experimental/mesh-builder/README.md](experimental/mesh-builder/README.md) for the full algorithm description, tuning constants, and limitations.
-
-### Other experimental tools
+Self-contained tools that aren't part of the main pipeline live in [experimental/](experimental/). Each is independently runnable and has its own README.
 
 | Tool | Status | What it does |
 |---|---|---|
-| [experimental/roof-shape-from-buildings3d/](experimental/roof-shape-from-buildings3d/) | working | Per-building roof characteristics (area, slope, shape, height) by analysing swissBUILDINGS3D 3D mesh geometry. CSV output, parallelised, processes 100k+ buildings |
-| [experimental/green-roof-from-rs/](experimental/green-roof-from-rs/) | working | Per-building green roof coverage via NDVI on swissIMAGE-RS multispectral imagery (4-band, 0.25 m). Reads any footprint source (GPKG/SHP/GDB/GeoJSON), outputs CSV with `green_roof_area_m2`, `green_roof_percentage`, `ndvi_mean`, `ndvi_max` |
-| [experimental/floor-level-estimator/](experimental/floor-level-estimator/) | unmaintained | Earlier per-floor estimator (gbaup-based) |
+| [experimental/mesh-builder/](experimental/mesh-builder/) | working | Watertight 3D building hulls from AV cadastral footprints + swisstopo DSM/DTM rasters, with an in-browser three.js viewer |
+| [experimental/roof-shape-from-buildings3d/](experimental/roof-shape-from-buildings3d/) | working | Per-building roof characteristics (area, slope, shape, height) by analysing swissBUILDINGS3D 3D mesh geometry |
+| [experimental/green-roof-from-rs/](experimental/green-roof-from-rs/) | working | Per-building green roof coverage via NDVI on swissIMAGE-RS multispectral imagery |
+| [experimental/floor-level-estimator/](experimental/floor-level-estimator/) | unmaintained | Earlier per-floor estimator with construction-period (gbaup) factor |
 
 ---
 
