@@ -8,7 +8,16 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from footprints import _normalise_cell, _parse_egid_cell, _read_input_csv
+import geopandas as gpd
+from pyproj import Transformer
+from shapely.geometry import Point, Polygon
+
+from footprints import (
+    _normalise_cell,
+    _parse_egid_cell,
+    _read_input_csv,
+    load_footprints_from_av_with_coordinates,
+)
 
 
 # ── _parse_egid_cell ────────────────────────────────────────────────────────
@@ -75,6 +84,15 @@ from footprints import _normalise_cell, _parse_egid_cell, _read_input_csv
     # Float-looking values truncate (preserves prior _to_gwr_code behavior)
     ("1234.5", [1234]),
     ("1234.5, 5678", [1234, 5678]),
+
+    # Infinity / overflow — int(inf) raises OverflowError natively, must
+    # be caught and returned as [] instead of crashing the whole loader.
+    ("inf", []),
+    ("-inf", []),
+    ("1e400", []),       # parses to inf via float()
+    ("nan", []),         # parses to NaN via float() — also rejected
+    ("1234, inf", []),   # one bad token poisons the whole list
+    (float("inf"), []),
 ])
 def test_parse_egid_cell(raw, expected):
     assert _parse_egid_cell(raw) == expected
@@ -252,4 +270,134 @@ def test_read_csv_cleanup_preserves_nan_in_string_column(tmp_path: Path):
     # The egid column is object dtype because of the comma-separated value
     assert df.iloc[0]["egid"] == "1234,5678"
     assert pd.isna(df.iloc[1]["egid"])
+
+
+# ── Coordinate-mode loader integration tests ──────────────────────────────
+
+
+# A few real-ish LV95 coordinates near Bern (Roche Tower area).
+# Building polygons are tiny squares around these points so the test runs fast.
+_TEST_LV95_X = 2600000
+_TEST_LV95_Y = 1200000
+_LV95_TO_WGS84 = Transformer.from_crs("EPSG:2056", "EPSG:4326", always_xy=True)
+
+
+def _make_synthetic_av_gpkg(tmp_path: Path) -> Path:
+    """
+    Build a tiny synthetic AV-style GeoPackage with three known building
+    polygons. Used by the coordinate-loader integration tests so we don't
+    depend on the real ~5 GB cadastral file.
+    """
+    cx, cy = _TEST_LV95_X, _TEST_LV95_Y
+    polys = [
+        # Building A: 10x10 m square at (cx, cy)
+        Polygon([(cx, cy), (cx + 10, cy), (cx + 10, cy + 10), (cx, cy + 10)]),
+        # Building B: 10x10 m square 30 m east
+        Polygon([(cx + 30, cy), (cx + 40, cy), (cx + 40, cy + 10), (cx + 30, cy + 10)]),
+        # Building C: 10x10 m square 60 m east
+        Polygon([(cx + 60, cy), (cx + 70, cy), (cx + 70, cy + 10), (cx + 60, cy + 10)]),
+    ]
+    gdf = gpd.GeoDataFrame(
+        {
+            'Art': ['Gebaeude', 'Gebaeude', 'Gebaeude'],
+            'GWR_EGID': [1001, 1002, 1003],
+            'geometry': polys,
+        },
+        crs='EPSG:2056',
+    )
+    av_path = tmp_path / "synthetic_av.gpkg"
+    gdf.to_file(av_path, layer='lcsf', driver='GPKG')
+    return av_path
+
+
+def _lv95_point_to_wgs(x: float, y: float) -> tuple[float, float]:
+    lon, lat = _LV95_TO_WGS84.transform(x, y)
+    return lon, lat
+
+
+def test_coordinate_loader_matches_each_point_to_correct_polygon(tmp_path: Path):
+    """End-to-end: 3 points → 3 polygons, each matched correctly."""
+    av_path = _make_synthetic_av_gpkg(tmp_path)
+    cx, cy = _TEST_LV95_X, _TEST_LV95_Y
+    # Centers of each polygon
+    centers_lv95 = [(cx + 5, cy + 5), (cx + 35, cy + 5), (cx + 65, cy + 5)]
+    centers_wgs = [_lv95_point_to_wgs(x, y) for x, y in centers_lv95]
+
+    csv_path = tmp_path / "pts.csv"
+    csv_path.write_text(
+        "id,lon,lat\n"
+        + f"A,{centers_wgs[0][0]},{centers_wgs[0][1]}\n"
+        + f"B,{centers_wgs[1][0]},{centers_wgs[1][1]}\n"
+        + f"C,{centers_wgs[2][0]},{centers_wgs[2][1]}\n",
+        encoding='utf-8',
+    )
+
+    result = load_footprints_from_av_with_coordinates(str(av_path), str(csv_path))
+    # Sort by input_id so the assertions are positional
+    result = result.sort_values('input_id').reset_index(drop=True)
+    assert len(result) == 3
+    assert result.iloc[0]['input_id'] == 'A'
+    assert int(result.iloc[0]['av_egid']) == 1001
+    assert int(result.iloc[1]['av_egid']) == 1002
+    assert int(result.iloc[2]['av_egid']) == 1003
+    # Every match has status_step1='ok' and a real geometry
+    assert (result['status_step1'] == 'ok').all()
+    assert result['geometry'].notna().all()
+
+
+def test_coordinate_loader_no_match_emits_no_footprint(tmp_path: Path):
+    """A point that lands far from any polygon → status_step1='no_footprint'."""
+    av_path = _make_synthetic_av_gpkg(tmp_path)
+    cx, cy = _TEST_LV95_X, _TEST_LV95_Y
+    # Point 500 m east of any polygon — outside the union bbox + buffer
+    far_lv95 = (cx + 1000, cy)
+    far_lon, far_lat = _lv95_point_to_wgs(*far_lv95)
+
+    csv_path = tmp_path / "far.csv"
+    csv_path.write_text(
+        f"id,lon,lat\nMISS,{far_lon},{far_lat}\n",
+        encoding='utf-8',
+    )
+
+    result = load_footprints_from_av_with_coordinates(str(av_path), str(csv_path))
+    assert len(result) == 1
+    assert result.iloc[0]['status_step1'] == 'no_footprint'
+    assert result.iloc[0]['av_egid'] is None
+    assert result.iloc[0]['geometry'] is None
+
+
+def test_coordinate_loader_does_one_gpkg_read_for_many_points(tmp_path: Path, monkeypatch):
+    """
+    Regression: the refactored loader must call _load_av_buildings exactly
+    ONCE regardless of how many input points there are. The old code did
+    one read per point (O(n) gpkg I/O); the refactor moves to O(1).
+    """
+    av_path = _make_synthetic_av_gpkg(tmp_path)
+    cx, cy = _TEST_LV95_X, _TEST_LV95_Y
+    centers_lv95 = [(cx + 5, cy + 5), (cx + 35, cy + 5), (cx + 65, cy + 5)]
+
+    # 9 input points, 3 hitting each polygon
+    rows = []
+    for i, (x, y) in enumerate(centers_lv95 * 3):
+        lon, lat = _lv95_point_to_wgs(x, y)
+        rows.append(f"id_{i},{lon},{lat}")
+    csv_path = tmp_path / "many.csv"
+    csv_path.write_text("id,lon,lat\n" + "\n".join(rows) + "\n", encoding='utf-8')
+
+    # Spy on _load_av_buildings to count invocations
+    import footprints
+    call_count = {"n": 0}
+    real_loader = footprints._load_av_buildings
+
+    def counting_loader(*args, **kwargs):
+        call_count["n"] += 1
+        return real_loader(*args, **kwargs)
+
+    monkeypatch.setattr(footprints, "_load_av_buildings", counting_loader)
+
+    result = load_footprints_from_av_with_coordinates(str(av_path), str(csv_path))
+    assert len(result) == 9
+    assert call_count["n"] == 1, (
+        f"expected exactly 1 call to _load_av_buildings, got {call_count['n']}"
+    )
 

@@ -45,6 +45,13 @@ from volume import make_empty_volume_result
     ("  1234  ", 1234),
     (0, 0),
     (-1, -1),
+    # Infinity / overflow — int(inf) raises OverflowError natively, must
+    # be caught and returned as None instead of crashing.
+    (float("inf"), None),
+    (float("-inf"), None),
+    ("inf", None),
+    ("-inf", None),
+    ("1e400", None),  # parses to inf via float()
 ])
 def test_to_gwr_code(value, expected):
     assert _to_gwr_code(value) == expected

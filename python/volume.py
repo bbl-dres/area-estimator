@@ -25,15 +25,84 @@ Outputs per building:
 import logging
 from collections import OrderedDict
 from pathlib import Path
+from typing import Any, Optional, TypedDict, Union
 
 import numpy as np
 import rasterio
 from shapely import contains_xy
 from shapely.affinity import rotate
+from shapely.geometry.base import BaseGeometry
 
 from tile_fetcher import tile_ids_from_bounds
 
 log = logging.getLogger(__name__)
+
+
+# ── Canonical pipeline result row ──────────────────────────────────────────
+
+
+class BuildingResult(TypedDict, total=False):
+    """
+    The canonical dict that flows through the pipeline. Fields are added
+    incrementally:
+
+    - **Step 1** (footprints.py) sets the identifiers and ``status_step1``.
+    - **Step 3** (volume.py) adds measurements and ``status_step3``.
+    - **Step 4** (area.py) adds GWR fields, floor-area fields, and
+      ``status_step4``.
+    - **Aggregation** (main.py) collapses sub-rows by ``input_id``. After
+      aggregation, numeric fields may become ``';'``-joined strings when
+      sub-rows disagree (multi-EGID input or multi-polygon AV match) —
+      the column dtype becomes ``object`` for any column with at least
+      one aggregated row.
+
+    ``total=False`` because individual fields may be absent depending on
+    which steps succeeded; e.g. a row with ``status_step1='no_footprint'``
+    has no Step 3 measurements, and a row without ``--estimate-area`` has
+    no Step 4 fields. Field types here document the *primary* type — see
+    the docstring above for the post-aggregation string fallback.
+    """
+
+    # Step 1: identifiers + status
+    input_id: Union[str, int]
+    input_egid: Optional[int]
+    input_egid_raw: Optional[str]
+    input_lon: Optional[float]   # only present in --use-coordinates mode
+    input_lat: Optional[float]   # only present in --use-coordinates mode
+    av_egid: Optional[int]
+    fid: Optional[str]
+    area_official_m2: Optional[float]
+    geometry: Any  # shapely geometry; only present in Step 1 GeoDataFrames
+    status_step1: str
+
+    # Step 3: volume + heights
+    area_footprint_m2: Optional[float]
+    volume_above_ground_m3: Optional[float]
+    elevation_base_min_m: Optional[float]
+    elevation_base_mean_m: Optional[float]
+    elevation_base_max_m: Optional[float]
+    elevation_roof_min_m: Optional[float]
+    elevation_roof_mean_m: Optional[float]
+    elevation_roof_max_m: Optional[float]
+    height_mean_m: Optional[float]
+    height_max_m: Optional[float]
+    height_minimal_m: Optional[float]
+    grid_points_count: int
+    status_step3: str
+    warnings: str
+
+    # Step 4: GWR + floor area
+    gkat: Optional[int]
+    gklas: Optional[int]
+    gbauj: Optional[int]
+    gastw: Optional[int]
+    floor_height_used_m: Optional[float]
+    floor_height_source: Optional[str]
+    floors_estimated: Optional[int]
+    area_floor_total_m2: Optional[float]
+    area_accuracy: Optional[str]
+    building_type: Optional[str]
+    status_step4: Optional[str]
 
 # LRU tile cache size (each cached tile = one open file handle)
 MAX_CACHED_TILES = 200
@@ -76,7 +145,7 @@ STATUS_SKIPPED_PREFIX = "skipped:"
 # ── Step 2: Aligned Grid ────────────────────────────────────────────────────
 
 
-def get_building_orientation(polygon):
+def get_building_orientation(polygon: BaseGeometry) -> float:
     """
     Calculate building orientation using minimum area bounding rectangle.
 
@@ -108,7 +177,10 @@ def get_building_orientation(polygon):
     return angles[longest_idx]
 
 
-def create_aligned_grid_points(polygon, voxel_size=1.0):
+def create_aligned_grid_points(
+    polygon: BaseGeometry,
+    voxel_size: float = 1.0,
+) -> list[tuple[float, float]]:
     """
     Create grid points aligned to building orientation.
 
@@ -173,7 +245,7 @@ def create_aligned_grid_points(polygon, voxel_size=1.0):
 class TileIndex:
     """Indexes and caches swisstopo GeoTIFF elevation tiles."""
 
-    def __init__(self, alti3d_dir, surface3d_dir):
+    def __init__(self, alti3d_dir: str, surface3d_dir: str) -> None:
         self.alti3d_dir = Path(alti3d_dir)
         self.surface3d_dir = Path(surface3d_dir)
         # OrderedDict gives us real LRU semantics: move_to_end(key) on hit,
@@ -186,7 +258,7 @@ class TileIndex:
         log.info(f"  Found {len(self.alti3d_tiles)} swissALTI3D tiles")
         log.info(f"  Found {len(self.surface3d_tiles)} swissSURFACE3D tiles")
 
-    def _index_tiles(self, directory):
+    def _index_tiles(self, directory: Path) -> dict[str, Path]:
         """
         Scan directory and build tile_id -> filepath mapping.
 
@@ -216,7 +288,7 @@ class TileIndex:
 
         return tile_index
 
-    def _open_tile(self, cache_key, tile_path):
+    def _open_tile(self, cache_key: str, tile_path: Path) -> None:
         """Open a tile, evicting the least-recently-used entry when full."""
         if len(self.tile_cache) >= MAX_CACHED_TILES:
             _, evicted = self.tile_cache.popitem(last=False)
@@ -224,7 +296,12 @@ class TileIndex:
 
         self.tile_cache[cache_key] = rasterio.open(tile_path)
 
-    def sample_heights(self, points, tiles, model_type):
+    def sample_heights(
+        self,
+        points: list[tuple[float, float]],
+        tiles: list[str],
+        model_type: str,
+    ) -> np.ndarray:
         """
         Sample height values from raster tiles at given points.
 
@@ -309,16 +386,21 @@ class TileIndex:
 
         return heights
 
-    def close(self):
+    def close(self) -> None:
         """Close all cached raster files."""
         for src in self.tile_cache.values():
             src.close()
         self.tile_cache.clear()
 
 
-def make_empty_volume_result(av_egid=None, fid=None,
-                             area_footprint_m2=None, area_official_m2=None,
-                             status_step3=None, warnings=''):
+def make_empty_volume_result(
+    av_egid: Optional[int] = None,
+    fid: Optional[str] = None,
+    area_footprint_m2: Optional[float] = None,
+    area_official_m2: Optional[float] = None,
+    status_step3: Optional[str] = None,
+    warnings: str = '',
+) -> BuildingResult:
     """
     Build a result row with no measurements — used both as the base for
     successful runs (mutated below) and standalone for skipped buildings
@@ -353,7 +435,7 @@ def make_empty_volume_result(av_egid=None, fid=None,
     return result
 
 
-def append_warning(result, message):
+def append_warning(result: dict, message: Optional[str]) -> None:
     """Append a warning message to a result row's ``warnings`` column."""
     if not message:
         return
@@ -361,8 +443,14 @@ def append_warning(result, message):
     result['warnings'] = f'{existing}; {message}' if existing else message
 
 
-def calculate_building_volume(polygon, tile_index, av_egid=None, fid=None,
-                              area_official_m2=None, voxel_size=1.0):
+def calculate_building_volume(
+    polygon: BaseGeometry,
+    tile_index: "TileIndex",
+    av_egid: Optional[int] = None,
+    fid: Optional[str] = None,
+    area_official_m2: Optional[float] = None,
+    voxel_size: float = 1.0,
+) -> BuildingResult:
     """
     Calculate volume and height metrics for a single building.
 

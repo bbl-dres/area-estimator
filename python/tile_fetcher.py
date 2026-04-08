@@ -12,6 +12,7 @@ import logging
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Iterable, Union
 
 import requests
 
@@ -32,7 +33,9 @@ CHUNK_SIZE = 64 * 1024  # 64 KB
 DOWNLOAD_TIMEOUT = 300
 
 
-def tile_ids_from_bounds(bounds):
+def tile_ids_from_bounds(
+    bounds: tuple[float, float, float, float],
+) -> set[str]:
     """Get set of tile IDs covering a bounding box in LV95 coordinates."""
     minx, miny, maxx, maxy = bounds
     tile_ids = set()
@@ -42,7 +45,12 @@ def tile_ids_from_bounds(bounds):
     return tile_ids
 
 
-def _download_tile(tile_id, url_template, output_dir, label):
+def _download_tile(
+    tile_id: str,
+    url_template: str,
+    output_dir: Path,
+    label: str,
+) -> bool:
     """
     Download a single tile if not already present locally.
 
@@ -88,7 +96,11 @@ def _download_tile(tile_id, url_template, output_dir, label):
     return False
 
 
-def ensure_tiles(tile_ids, alti3d_dir, surface3d_dir):
+def ensure_tiles(
+    tile_ids: Iterable[str],
+    alti3d_dir: Union[str, Path],
+    surface3d_dir: Union[str, Path],
+) -> dict[str, int]:
     """
     Ensure all required tiles are available locally, downloading any that are missing.
 

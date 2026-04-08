@@ -211,6 +211,53 @@ def test_aggregate_status_rollup_all_failed():
     assert out.iloc[0]["status_step3"] == "skipped:no_footprint"
 
 
+def test_aggregate_warning_text_all_failed_no_egids():
+    """
+    Regression for B5: when n_unique_egids == 0 (every sub-row had
+    av_egid = NaN), the aggregation note must NOT say "for one EGID" —
+    there's no EGID. It should explicitly say "none matched".
+    """
+    df = _build_df([
+        {"input_id": "A", "av_egid": None, "fid": None, "area_footprint_m2": None,
+         "warnings": "", "status_step3": "skipped:no_footprint"},
+        {"input_id": "A", "av_egid": None, "fid": None, "area_footprint_m2": None,
+         "warnings": "", "status_step3": "skipped:no_footprint"},
+    ])
+    out = aggregate_by_input_id(df)
+    note = out.iloc[0]["warnings"]
+    assert "none matched" in note
+    assert "for one EGID" not in note  # the misleading text from before
+    assert "distinct EGIDs" not in note
+
+
+def test_aggregate_warning_text_one_egid_multi_polygons():
+    """One EGID, two polygons → aggregation note mentions 'one EGID'."""
+    df = _build_df([
+        {"input_id": "A", "av_egid": 1234, "fid": "f1",
+         "area_footprint_m2": 100.0, "warnings": "", "status_step3": "success"},
+        {"input_id": "A", "av_egid": 1234, "fid": "f2",
+         "area_footprint_m2": 150.0, "warnings": "", "status_step3": "success"},
+    ])
+    out = aggregate_by_input_id(df)
+    note = out.iloc[0]["warnings"]
+    assert "AV polygons for one EGID" in note
+    assert "distinct EGIDs" not in note
+
+
+def test_aggregate_warning_text_multi_egid():
+    """Two distinct EGIDs → aggregation note mentions 'distinct EGIDs'."""
+    df = _build_df([
+        {"input_id": "A", "av_egid": 1234, "fid": "f1",
+         "area_footprint_m2": 100.0, "warnings": "", "status_step3": "success"},
+        {"input_id": "A", "av_egid": 5678, "fid": "f2",
+         "area_footprint_m2": 200.0, "warnings": "", "status_step3": "success"},
+    ])
+    out = aggregate_by_input_id(df)
+    note = out.iloc[0]["warnings"]
+    assert "distinct EGIDs" in note
+    assert "for one EGID" not in note
+
+
 def test_aggregate_warnings_deduplicated():
     """
     The same warning text repeated across sub-rows must NOT appear twice
@@ -258,13 +305,42 @@ def test_aggregate_demotes_integer_floats_in_object_cols():
 
 def test_aggregate_pass_through_cols_not_arrayed():
     """
-    Columns in _AGGREGATE_PASS_THROUGH_COLS (input_id, status_*, warnings)
-    must not be ;-joined even if they differ — they have special handling
-    elsewhere in _reduce_group or are the group key.
+    Columns in _AGGREGATE_PASS_THROUGH_COLS (input_id, status_*, warnings,
+    geometry) must not be ;-joined even if they differ — they have
+    special handling elsewhere in _reduce_group or are the group key.
     """
     assert "input_id" in _AGGREGATE_PASS_THROUGH_COLS
     assert "status_step3" in _AGGREGATE_PASS_THROUGH_COLS
     assert "warnings" in _AGGREGATE_PASS_THROUGH_COLS
+    assert "geometry" in _AGGREGATE_PASS_THROUGH_COLS  # B6 defensive guard
+
+
+def test_aggregate_geometry_column_not_string_joined():
+    """
+    Regression for B6: today's pipeline drops the geometry column before
+    aggregation, but the aggregation step must defensively NOT string-join
+    geometries if a future change leaves it in. With the geometry column
+    in _AGGREGATE_PASS_THROUGH_COLS, a multi-row group keeps the first
+    sub-row's geometry as a real Shapely object (not a WKT string).
+    """
+    from shapely.geometry import Polygon
+    poly_a = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])
+    poly_b = Polygon([(20, 20), (30, 20), (30, 30), (20, 30)])
+    df = _build_df([
+        {"input_id": "X", "av_egid": 1234, "fid": "f1",
+         "area_footprint_m2": 100.0, "geometry": poly_a,
+         "warnings": "", "status_step3": "success"},
+        {"input_id": "X", "av_egid": 1234, "fid": "f2",
+         "area_footprint_m2": 150.0, "geometry": poly_b,
+         "warnings": "", "status_step3": "success"},
+    ])
+    out = aggregate_by_input_id(df)
+    assert len(out) == 1
+    geom = out.iloc[0]["geometry"]
+    # Must still be a real Shapely Polygon, not a string of joined WKTs
+    assert isinstance(geom, Polygon), f"geometry got string-joined: {type(geom).__name__}"
+    # The first sub-row's polygon is preserved
+    assert geom.equals(poly_a)
 
 
 def test_aggregate_preserves_column_order():

@@ -17,8 +17,10 @@ All functions return a GeoDataFrame in LV95 (EPSG:2056) with columns:
 """
 
 import logging
+import math
 import re
 from pathlib import Path
+from typing import Any, Optional, Union
 
 import geopandas as gpd
 import pandas as pd
@@ -36,11 +38,23 @@ log = logging.getLogger(__name__)
 AV_BUILDING_LAYER = 'lcsf'
 # Art value for buildings within the lcsf layer
 AV_BUILDING_TYPE = 'Gebaeude'
-# Buffer (m) around each point's bbox when querying AV in spatial join mode
+# Buffer (m) around the union bbox of all input points when querying AV
+# in coordinate spatial-join mode. Wide enough to include any building a
+# point could realistically belong to (Swiss buildings rarely exceed 100m
+# across) without pulling in unnecessary neighbours.
 AV_POINT_BBOX_BUFFER_M = 200
 
+# Warn the user when the union bbox of all input points covers more than
+# this many square kilometres — that means a portfolio scattered across a
+# huge area, and the single AV read might pull millions of features.
+AV_UNION_BBOX_WARN_KM2 = 100
 
-def load_footprints_from_file(filepath, bbox=None, limit=None):
+
+def load_footprints_from_file(
+    filepath: Union[str, Path],
+    bbox: Optional[tuple[float, float, float, float]] = None,
+    limit: Optional[int] = None,
+) -> gpd.GeoDataFrame:
     """
     Load all building footprints from a geodata file (GeoPackage, Shapefile, GeoJSON).
 
@@ -65,7 +79,11 @@ def load_footprints_from_file(filepath, bbox=None, limit=None):
     return gdf[['av_egid', 'fid', 'area_official_m2', 'geometry', 'status_step1', 'warnings']]
 
 
-def _load_av_buildings(av_path, bbox_lv95=None, where_sql=None):
+def _load_av_buildings(
+    av_path: Union[str, Path],
+    bbox_lv95: Optional[tuple[float, float, float, float]] = None,
+    where_sql: Optional[str] = None,
+) -> gpd.GeoDataFrame:
     """
     Internal helper: load and normalise an AV GeoPackage/Shapefile/GeoJSON.
     For GeoPackages, always reads the AV_BUILDING_LAYER ('lcsf').
@@ -77,6 +95,14 @@ def _load_av_buildings(av_path, bbox_lv95=None, where_sql=None):
             the file read at the GDAL/pyogrio level.
         where_sql: Optional SQL WHERE clause (no leading "WHERE") pushed down
             to the reader. Used by the EGID loader for IN-list filtering.
+
+    Note: AV building features are guaranteed to be **single Polygons** —
+    verified across all 2,465,446 ``Art = Gebaeude`` features in the
+    Swiss AV file (0 MultiPolygons, 0 invalid geometries). The cadastral
+    data model enforces single-polygon-per-building, so we don't need
+    defensive ``make_valid()`` / ``unary_union()`` calls. Polygons with
+    interior holes (~0.07% of buildings) are handled correctly by
+    ``polygon.area`` and ``shapely.contains_xy``.
     """
     av_path = Path(av_path)
     if not av_path.exists():
@@ -139,7 +165,7 @@ def _load_av_buildings(av_path, bbox_lv95=None, where_sql=None):
 _EGID_SEPARATOR_RE = re.compile(r'[,/;\s]+')
 
 
-def _parse_egid_cell(raw):
+def _parse_egid_cell(raw: Any) -> list[int]:
     """
     Parse a CSV ``egid`` cell into a list of valid (positive int) EGIDs.
 
@@ -175,16 +201,21 @@ def _parse_egid_cell(raw):
     result = []
     for token in tokens:
         try:
-            n = int(float(token))
+            as_float = float(token)
         except (TypeError, ValueError):
             return []
+        # Reject NaN, inf, -inf — int(inf) raises OverflowError, NaN
+        # would silently truncate to a meaningless integer.
+        if not math.isfinite(as_float):
+            return []
+        n = int(as_float)
         if n <= 0:
             return []
         result.append(n)
     return result
 
 
-def _normalise_cell(value):
+def _normalise_cell(value: Any) -> Any:
     """
     Collapse every run of whitespace (spaces, tabs, line breaks, NBSPs)
     to a single space and strip leading/trailing whitespace. Returns
@@ -199,7 +230,7 @@ def _normalise_cell(value):
     return ' '.join(str(value).split())
 
 
-def _read_input_csv(csv_path):
+def _read_input_csv(csv_path: Union[str, Path]) -> pd.DataFrame:
     """
     Read a CSV with delimiter auto-detect, BOM handling, and a strict
     cell-cleanup pass.
@@ -231,7 +262,11 @@ def _read_input_csv(csv_path):
     return df
 
 
-def load_footprints_from_av_with_egids(av_path, csv_path, limit=None):
+def load_footprints_from_av_with_egids(
+    av_path: Union[str, Path],
+    csv_path: Union[str, Path],
+    limit: Optional[int] = None,
+) -> gpd.GeoDataFrame:
     """
     Load AV building footprints, filtered to a set of EGIDs from a CSV.
 
@@ -400,8 +435,16 @@ def load_footprints_from_av_with_egids(av_path, csv_path, limit=None):
     return gpd.GeoDataFrame(records, crs='EPSG:2056')
 
 
-def _egid_record(input_id, input_egid, av_egid, fid, geometry,
-                 area_official_m2, status, warnings):
+def _egid_record(
+    input_id: Any,
+    input_egid: Any,
+    av_egid: Any,
+    fid: Any,
+    geometry: Any,
+    area_official_m2: Any,
+    status: str,
+    warnings: list[str],
+) -> dict:
     """Build a single output row for the EGID-match loader."""
     return {
         'input_id': input_id,
@@ -415,13 +458,22 @@ def _egid_record(input_id, input_egid, av_egid, fid, geometry,
     }
 
 
-def load_footprints_from_av_with_coordinates(av_path, csv_path, limit=None):
+def load_footprints_from_av_with_coordinates(
+    av_path: Union[str, Path],
+    csv_path: Union[str, Path],
+    limit: Optional[int] = None,
+) -> gpd.GeoDataFrame:
     """
     Load AV building footprints, filtered to a set of CSV coordinates via spatial join.
 
     Each CSV point must fall strictly within an AV building polygon (predicate='within').
     There are no fallbacks: points that do not intersect any polygon get
     status_step1 = 'no_footprint' and are skipped downstream.
+
+    Performance: a single ``_load_av_buildings`` read is performed against
+    the *union* bbox of every input point (with buffer), and the resulting
+    GeoDataFrame's spatial index handles all per-point lookups in memory.
+    This is O(1) gpkg I/O instead of the previous O(n) per-point reads.
 
     This is the legacy/opt-in path. EGID match (see
     ``load_footprints_from_av_with_egids``) is faster and unambiguous, but
@@ -435,6 +487,7 @@ def load_footprints_from_av_with_coordinates(av_path, csv_path, limit=None):
         input_id, input_egid, input_lon, input_lat,
         av_egid, fid, area_official_m2, geometry, status_step1, warnings
     """
+    csv_path = Path(csv_path)
     df = _read_input_csv(csv_path)
 
     missing = [c for c in ['lon', 'lat', 'id'] if c not in df.columns]
@@ -456,7 +509,10 @@ def load_footprints_from_av_with_coordinates(av_path, csv_path, limit=None):
 
     log.info(f"Loaded {len(df)} rows from {csv_path.name}")
 
-    # ── Create LV95 points ────────────────────────────────────────────────
+    if len(df) == 0:
+        return gpd.GeoDataFrame(geometry=[], crs='EPSG:2056')
+
+    # ── Convert input lon/lat to LV95 points ──────────────────────────────
     pts = gpd.GeoDataFrame(
         df,
         geometry=[Point(r['lon'], r['lat']) for _, r in df.iterrows()],
@@ -464,37 +520,67 @@ def load_footprints_from_av_with_coordinates(av_path, csv_path, limit=None):
     ).to_crs('EPSG:2056')
 
     n = len(pts)
-    log.info(f"  Point-by-point spatial join: {n} points  "
-             f"(AV: {Path(av_path).name}, layer={AV_BUILDING_LAYER}, "
-             f"bbox buffer={AV_POINT_BBOX_BUFFER_M}m)")
 
-    # ── Process point by point ────────────────────────────────────────────
+    # ── Single push-down read against the union bbox ──────────────────────
+    minx, miny, maxx, maxy = pts.total_bounds
+    union_bbox = (
+        minx - AV_POINT_BBOX_BUFFER_M,
+        miny - AV_POINT_BBOX_BUFFER_M,
+        maxx + AV_POINT_BBOX_BUFFER_M,
+        maxy + AV_POINT_BBOX_BUFFER_M,
+    )
+
+    # Sanity-check the bbox extent. A portfolio scattered across a huge
+    # area can pull millions of features in one shot — warn the user but
+    # don't auto-chunk; that's a separate optimisation.
+    bbox_km2 = ((union_bbox[2] - union_bbox[0]) *
+                (union_bbox[3] - union_bbox[1])) / 1_000_000
+    if bbox_km2 > AV_UNION_BBOX_WARN_KM2:
+        log.warning(
+            f"  Union bbox of {n} input points spans {bbox_km2:,.0f} km² — "
+            f"the AV read may pull a large number of features into memory. "
+            f"Consider splitting the input by region if this is slow."
+        )
+
+    log.info(
+        f"  Coordinate spatial join: {n} points "
+        f"(AV: {Path(av_path).name}, layer={AV_BUILDING_LAYER}, "
+        f"union bbox: {bbox_km2:,.1f} km² with {AV_POINT_BBOX_BUFFER_M}m buffer)"
+    )
+    av = _load_av_buildings(av_path, bbox_lv95=union_bbox)
+    log.info(f"  AV returned {len(av)} polygons within union bbox")
+
+    # Build a spatial index over the AV polygons. The index lets each
+    # point-in-polygon check run in O(log n) instead of O(n).
+    sindex = av.sindex
+
+    # ── Process each point against the cached gdf ─────────────────────────
     records = []
     matched = 0
     no_match = 0
+    multi_polygon_hits = 0
 
-    for i, (_, row) in enumerate(pts.iterrows()):
+    for row in pts.itertuples(index=False):
         pt = row.geometry
-        bbox = (pt.x - AV_POINT_BBOX_BUFFER_M, pt.y - AV_POINT_BBOX_BUFFER_M,
-                pt.x + AV_POINT_BBOX_BUFFER_M, pt.y + AV_POINT_BBOX_BUFFER_M)
-
-        local_av = _load_av_buildings(av_path, bbox_lv95=bbox)
-
-        # Find the polygon(s) containing this point
-        hit = local_av[local_av.geometry.contains(pt)]
+        # Spatial index narrows down candidates by bounding box, then
+        # contains() filters to actual point-in-polygon hits.
+        candidate_idx = list(sindex.intersection((pt.x, pt.y, pt.x, pt.y)))
+        candidates = av.iloc[candidate_idx] if candidate_idx else av.iloc[[]]
+        hit = candidates[candidates.geometry.contains(pt)]
 
         if len(hit) > 0:
             warnings = []
             if len(hit) > 1:
                 warnings.append(
-                    f'Point fell inside {len(hit)} AV polygons — emitting one row per polygon'
+                    f'Point fell inside {len(hit)} AV polygons'
                 )
+                multi_polygon_hits += 1
             for _, av_row in hit.iterrows():
                 records.append({
-                    'input_id': row['input_id'],
-                    'input_egid': row['input_egid'],
-                    'input_lon': row['input_lon'],
-                    'input_lat': row['input_lat'],
+                    'input_id': row.input_id,
+                    'input_egid': row.input_egid,
+                    'input_lon': row.input_lon,
+                    'input_lat': row.input_lat,
                     'av_egid': av_row['av_egid'],
                     'fid': av_row['fid'],
                     'area_official_m2': av_row['area_official_m2'],
@@ -505,10 +591,10 @@ def load_footprints_from_av_with_coordinates(av_path, csv_path, limit=None):
                 matched += 1
         else:
             records.append({
-                'input_id': row['input_id'],
-                'input_egid': row['input_egid'],
-                'input_lon': row['input_lon'],
-                'input_lat': row['input_lat'],
+                'input_id': row.input_id,
+                'input_egid': row.input_egid,
+                'input_lon': row.input_lon,
+                'input_lat': row.input_lat,
                 'av_egid': None,
                 'fid': None,
                 'area_official_m2': None,
@@ -518,10 +604,9 @@ def load_footprints_from_av_with_coordinates(av_path, csv_path, limit=None):
             })
             no_match += 1
 
-        if (i + 1) % 100 == 0 or (i + 1) == n:
-            log.info(f"  [{i+1}/{n}] {(i+1)/n*100:.0f}%  "
-                     f"matched: {matched}  no_footprint: {no_match}")
-
-    log.info(f"  Total: {matched} matched, {no_match} no_footprint")
+    log.info(
+        f"  Matched: {matched}  no_footprint: {no_match}"
+        + (f"  multi-polygon points: {multi_polygon_hits}" if multi_polygon_hits else "")
+    )
     return gpd.GeoDataFrame(records, crs='EPSG:2056')
 

@@ -17,6 +17,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Union
 
 import pandas as pd
 
@@ -42,14 +43,22 @@ from area import enrich_with_gwr, estimate_floor_area
 # Columns where ``;``-joining sub-row values doesn't carry information —
 # either because the value is the group key, the rolled-up status of the
 # group, or because aggregation has its own dedicated handling below.
+#
+# ``geometry`` is in the pass-through set defensively: today the result
+# rows that reach aggregation never carry a geometry column (the Step 3
+# functions in volume.py drop it), but if that ever changes, the default
+# array path would call ``str(polygon)`` and produce a column of joined
+# WKT strings — almost certainly not what anyone wants. Keeping it
+# pass-through means the first sub-row's geometry is preserved as-is.
 _AGGREGATE_PASS_THROUGH_COLS = frozenset({
     'input_id', 'input_egid_raw',
     'status_step1', 'status_step3', 'status_step4',
     'warnings',
+    'geometry',
 })
 
 
-def aggregate_by_input_id(results_df):
+def aggregate_by_input_id(results_df: pd.DataFrame) -> pd.DataFrame:
     """
     Collapse sub-rows that share an ``input_id`` into one output row each.
 
@@ -99,14 +108,14 @@ def aggregate_by_input_id(results_df):
     return out
 
 
-def _demote_int_float(v):
+def _demote_int_float(v: Any) -> Any:
     """Convert integer-valued floats to ints; pass everything else through."""
     if isinstance(v, float) and not pd.isna(v) and v.is_integer():
         return int(v)
     return v
 
 
-def _format_sub_value(v):
+def _format_sub_value(v: Any) -> str:
     """Stringify one sub-row value for ``;``-joined arrays. Skips NaN."""
     if v is None or (isinstance(v, float) and pd.isna(v)):
         return ''
@@ -115,7 +124,7 @@ def _format_sub_value(v):
     return str(v)
 
 
-def _reduce_group(group):
+def _reduce_group(group: pd.DataFrame) -> dict:
     """Reduce one group of sub-rows (sharing input_id) into a single dict."""
     # Start from the first sub-row so the group key + pass-through columns
     # land naturally in the output.
@@ -163,17 +172,24 @@ def _reduce_group(group):
             f'aggregated {n_sub_rows} sub-rows from {n_unique_egids} distinct EGIDs '
             f'(numeric columns are ;-joined arrays — fix the input CSV to one EGID per row)'
         )
-    else:
+    elif n_unique_egids == 1:
         all_warnings.append(
             f'aggregated {n_sub_rows} AV polygons for one EGID '
             f'(numeric columns are ;-joined arrays — building is split across cadastral parcels)'
+        )
+    else:
+        # n_unique_egids == 0: every sub-row had av_egid = NaN, i.e. all
+        # parsed sub-EGIDs failed to find a polygon in AV. The aggregate
+        # row itself is a no-match summary across the input cell.
+        all_warnings.append(
+            f'aggregated {n_sub_rows} sub-rows, none matched a polygon in AV'
         )
     row['warnings'] = '; '.join(all_warnings)
 
     return row
 
 
-def setup_logging(output_path):
+def setup_logging(output_path: Union[str, Path]) -> Path:
     """Configure file + console logging. The log file lives next to the
     output CSV and shares its stem (so ``Gebäude_IN_20260408_1542.csv``
     pairs with ``Gebäude_IN_20260408_1542.log``). Idempotent if main()
@@ -207,7 +223,7 @@ def setup_logging(output_path):
     return log_file
 
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser(
         description='Swiss Building Volume & Area Estimator — '
                     'estimates building volumes and floor areas from elevation models'

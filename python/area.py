@@ -27,6 +27,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any, Optional
 
 import pandas as pd
 
@@ -34,6 +35,7 @@ from volume import (
     STATUS_NO_FOOTPRINT,
     STATUS_NO_VOLUME,
     STATUS_SUCCESS,
+    BuildingResult,
     append_warning,
 )
 
@@ -114,24 +116,31 @@ ACCURACY_LOW = 'low'         # ±25-40% — industrial, special, missing
 STATUS_HEIGHT_EXCEEDS_CAP = f'height_exceeds_{HEIGHT_SANITY_CAP_M}m'
 
 
-def _to_gwr_code(value):
+def _to_gwr_code(value: Any) -> Optional[int]:
     """
     Normalise a GWR code (gkat / gklas / gbauj / gastw) to ``int | None``.
 
     Accepts ints, floats (including NaN from pandas), strings, and None.
-    Returns None for any value that can't be coerced to a clean int.
+    Returns None for any value that can't be coerced to a clean int —
+    including ``inf`` / ``-inf`` (which crash ``int()`` with OverflowError)
+    and strings that parse to inf via ``float()``.
     """
     if value is None:
         return None
     if isinstance(value, float) and math.isnan(value):
         return None
     try:
-        return int(float(value))
-    except (TypeError, ValueError):
+        as_float = float(value)
+        if not math.isfinite(as_float):
+            return None
+        return int(as_float)
+    except (TypeError, ValueError, OverflowError):
         return None
 
 
-def get_floor_height(gkat, gklas):
+def get_floor_height(
+    gkat: Any, gklas: Any,
+) -> tuple[float, float, str, str]:
     """
     Look up floor height parameters based on GWR classification.
 
@@ -180,6 +189,10 @@ def get_floor_height(gkat, gklas):
 # tests/test_area.py::test_accuracy_dicts_cover_every_lookup_code.
 # Codes outside this list (e.g. a future GWR revision) fall through to
 # the catch-all in determine_accuracy().
+#
+# **If you change these mappings, also update the per-code table in
+# python/README.md ("How `area_accuracy` is computed" section).** The
+# README is one-time-written documentation and silently drifts otherwise.
 
 _ACCURACY_BY_GKLAS = {
     # Residential 11xx — High confidence (best-supported in the study)
@@ -227,7 +240,13 @@ _ACCURACY_BY_GKAT = {
 }
 
 
-def determine_accuracy(gkat, gklas, has_volume, has_footprint, floor_height_source=None):
+def determine_accuracy(
+    gkat: Any,
+    gklas: Any,
+    has_volume: bool,
+    has_footprint: bool,
+    floor_height_source: Optional[str] = None,
+) -> str:
     """
     Determine accuracy bucket from data quality and building type.
 
@@ -272,7 +291,7 @@ def determine_accuracy(gkat, gklas, has_volume, has_footprint, floor_height_sour
     return ACCURACY_MEDIUM
 
 
-def _is_missing(value):
+def _is_missing(value: Any) -> bool:
     """True if value is None or NaN — used to detect upstream gaps."""
     if value is None:
         return True
@@ -281,7 +300,7 @@ def _is_missing(value):
     return False
 
 
-def estimate_floor_area(volume_result):
+def estimate_floor_area(volume_result: dict) -> BuildingResult:
     """
     Estimate floor area for a single building from its volume result.
 
@@ -393,7 +412,7 @@ _GWR_OUTPUT_COLS = ('gkat', 'gklas', 'gbauj', 'gastw')
 GWR_FIND_URL = "https://api3.geo.admin.ch/rest/services/ech/MapServer/find"
 
 
-def load_gwr_from_csv(csv_path):
+def load_gwr_from_csv(csv_path: str) -> pd.DataFrame:
     """
     Load GWR building data from a bulk CSV download.
 
@@ -426,7 +445,7 @@ def load_gwr_from_csv(csv_path):
     return df
 
 
-def query_gwr_api(egid):
+def query_gwr_api(egid: Any) -> dict[str, Optional[int]]:
     """
     Fetch a single building's GWR attributes via swisstopo `find` (one HTTP call).
 
@@ -481,7 +500,10 @@ def query_gwr_api(egid):
     return result
 
 
-def enrich_with_gwr(buildings_df, gwr_csv_path=None):
+def enrich_with_gwr(
+    buildings_df: pd.DataFrame,
+    gwr_csv_path: Optional[str] = None,
+) -> pd.DataFrame:
     """
     Add GWR classification columns (gkat, gklas, gbauj, gastw) to a DataFrame.
 
@@ -519,7 +541,10 @@ def enrich_with_gwr(buildings_df, gwr_csv_path=None):
         for col in gwr_cols:
             df.loc[egids_available, col] = looked_up[col].values
 
-        matched = int(df.loc[egids_available, 'gkat'].notna().sum())
+        # Match counted as "any GWR column populated" — see note in the
+        # API path below for the same logic.
+        matched_subset = df.loc[egids_available, list(gwr_cols)]
+        matched = int(matched_subset.notna().any(axis=1).sum())
         log.info(f"  GWR CSV: matched {matched}/{n_with_egid} buildings")
 
     else:
@@ -564,7 +589,11 @@ def enrich_with_gwr(buildings_df, gwr_csv_path=None):
                 for col in _GWR_OUTPUT_COLS:
                     if attrs[col] is not None:
                         df.at[idx, col] = attrs[col]
-                if attrs['gkat'] is not None:
+                # Count as matched if ANY of the output cols came back —
+                # not just gkat. A building can legitimately have gkat=None
+                # but gklas/gbauj/gastw populated; we want to credit those
+                # as successful lookups too.
+                if any(attrs[c] is not None for c in _GWR_OUTPUT_COLS):
                     matched += 1
 
                 completed += 1
