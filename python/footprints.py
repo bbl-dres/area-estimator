@@ -21,16 +21,9 @@ from pathlib import Path
 
 import geopandas as gpd
 import pandas as pd
-from pyproj import Transformer
-from shapely.geometry import Point, box
+from shapely.geometry import Point
 
 log = logging.getLogger(__name__)
-
-# Buffer size (meters) for creating sampling polygons around CSV points
-POINT_BUFFER_M = 5.0
-
-# WGS84 → LV95 transformer (reused across calls)
-_wgs84_to_lv95 = Transformer.from_crs("EPSG:4326", "EPSG:2056", always_xy=True)
 
 # Layer name for building polygons in Swiss AV GeoPackages (Bodenbedeckungsflaeche)
 AV_BUILDING_LAYER = 'lcsf'
@@ -63,52 +56,6 @@ def load_footprints_from_file(filepath, bbox=None, limit=None):
     gdf['warnings'] = ''
     log.info(f"  {len(gdf)} building footprints loaded")
     return gdf[['av_egid', 'fid', 'area_official_m2', 'geometry', 'status_step1', 'warnings']]
-
-
-def load_coordinates_from_csv(csv_path, limit=None):
-    """
-    Load WGS84 coordinates from CSV and buffer into 10x10m sampling polygons.
-
-    Required columns: lon, lat, id
-    Optional columns: egid (preserved as-is for reference and GWR lookup)
-
-    Returns GeoDataFrame in LV95 with columns: id, egid, area_official_m2, geometry, status_step1
-    """
-    filepath = Path(csv_path)
-    log.info(f"Loading coordinates from {filepath.name}...")
-
-    if not filepath.exists():
-        raise FileNotFoundError(f"File not found: {filepath}")
-
-    df = pd.read_csv(filepath)
-    df.columns = [c.lower().strip() for c in df.columns]
-
-    required = ['lon', 'lat', 'id']
-    missing = [c for c in required if c not in df.columns]
-    if missing:
-        raise ValueError(f"CSV missing required columns: {missing}. Found: {list(df.columns)}")
-
-    # Keep user's egid column as-is for reference (av_egid is only from AV geodata)
-    if 'egid' not in df.columns:
-        df['egid'] = None
-
-    if limit:
-        df = df.head(limit)
-
-    geometry = [Point(row['lon'], row['lat']) for _, row in df.iterrows()]
-    gdf = gpd.GeoDataFrame(df, geometry=geometry, crs='EPSG:4326')
-    gdf = gdf.to_crs('EPSG:2056')
-
-    # Buffer points into square polygons
-    gdf['geometry'] = gdf.geometry.apply(
-        lambda pt: box(pt.x - POINT_BUFFER_M, pt.y - POINT_BUFFER_M,
-                       pt.x + POINT_BUFFER_M, pt.y + POINT_BUFFER_M)
-    )
-    gdf['area_official_m2'] = None
-    gdf['status_step1'] = 'ok'
-
-    log.info(f"Loaded {len(gdf)} coordinates (buffered to {POINT_BUFFER_M*2}x{POINT_BUFFER_M*2}m)")
-    return gdf[['id', 'egid', 'area_official_m2', 'geometry', 'status_step1']]
 
 
 def _load_av_buildings(av_path, bbox_lv95=None, where_sql=None):
@@ -236,15 +183,19 @@ def load_footprints_from_av_with_egids(av_path, csv_path, limit=None):
     df = df.rename(columns={'id': 'input_id'})
     df['input_egid_raw'] = df['egid']
     df['input_egid'] = pd.to_numeric(df['egid'], errors='coerce')
+    # Carry validity inline so the per-row loop below doesn't depend on
+    # an external boolean Series sharing the same index. Name avoids the
+    # leading underscore because pandas itertuples renames such columns
+    # to positional placeholders, breaking attribute access.
+    df['valid_egid'] = df['input_egid'].notna() & (df['input_egid'] > 0)
     df = df.reset_index(drop=True)
 
-    # Build the set of valid EGIDs we need to fetch from the AV file.
-    valid_mask = df['input_egid'].notna() & (df['input_egid'] > 0)
-    valid_egids = sorted({int(e) for e in df.loc[valid_mask, 'input_egid']})
+    valid_egids = sorted({int(e) for e in df.loc[df['valid_egid'], 'input_egid']})
 
     log.info(
         f"Loaded {len(df)} rows from {Path(csv_path).name} "
-        f"({len(valid_egids)} unique valid EGIDs, {(~valid_mask).sum()} invalid)"
+        f"({len(valid_egids)} unique valid EGIDs, "
+        f"{int((~df['valid_egid']).sum())} invalid)"
     )
 
     # ── Single push-down read ─────────────────────────────────────────────
@@ -258,7 +209,19 @@ def load_footprints_from_av_with_egids(av_path, csv_path, limit=None):
             f"Querying AV: {Path(av_path).name} "
             f"(layer={AV_BUILDING_LAYER}, WHERE GWR_EGID IN [{len(valid_egids)} ids])"
         )
-        av = _load_av_buildings(av_path, where_sql=where)
+        try:
+            av = _load_av_buildings(av_path, where_sql=where)
+        except Exception as e:
+            # The most common cause is an AV file whose building layer uses
+            # `egid` (or some other casing) instead of `GWR_EGID`. Re-raise
+            # with a clearer hint pointing the user at --use-coordinates.
+            raise ValueError(
+                f"EGID-match Step 1 failed querying {Path(av_path).name}: {e}. "
+                f"This usually means the AV file does not expose a GWR_EGID "
+                f"column on the {AV_BUILDING_LAYER!r} layer. EGID-match only "
+                f"works for AV-CH GeoPackages following the cadastral data "
+                f"model — use --use-coordinates if your file does not."
+            ) from e
         log.info(f"  AV returned {len(av)} polygons")
 
         # Group AV rows by EGID for fast lookup
@@ -272,23 +235,22 @@ def load_footprints_from_av_with_egids(av_path, csv_path, limit=None):
     invalid = 0
     multi_polygon_egids = 0
 
-    for _, row in df.iterrows():
-        input_id = row['input_id']
-        input_egid_num = row['input_egid']
+    for row in df.itertuples(index=False):
+        input_id = row.input_id
 
         # Invalid / missing EGID
-        if not valid_mask.loc[row.name]:
+        if not row.valid_egid:
             records.append(_egid_record(
                 input_id=input_id,
-                input_egid=row['input_egid_raw'],
+                input_egid=row.input_egid_raw,
                 av_egid=None, fid=None, geometry=None, area_official_m2=None,
                 status='invalid_egid',
-                warnings=[f'EGID could not be parsed as int: {row["input_egid_raw"]!r}'],
+                warnings=[f'EGID could not be parsed as a positive integer: {row.input_egid_raw!r}'],
             ))
             invalid += 1
             continue
 
-        egid_int = int(input_egid_num)
+        egid_int = int(row.input_egid)
         matches = av_by_egid.get(egid_int)
 
         if not matches:
@@ -413,25 +375,25 @@ def load_footprints_from_av_with_coordinates(av_path, csv_path, limit=None):
         hit = local_av[local_av.geometry.contains(pt)]
 
         if len(hit) > 0:
-            av_row = hit.iloc[0]
             warnings = []
             if len(hit) > 1:
                 warnings.append(
-                    f'Point fell inside {len(hit)} AV polygons — using first match'
+                    f'Point fell inside {len(hit)} AV polygons — emitting one row per polygon'
                 )
-            records.append({
-                'input_id': row['input_id'],
-                'input_egid': row['input_egid'],
-                'input_lon': row['input_lon'],
-                'input_lat': row['input_lat'],
-                'av_egid': av_row['av_egid'],
-                'fid': av_row['fid'],
-                'area_official_m2': av_row['area_official_m2'],
-                'geometry': av_row['geometry'],
-                'status_step1': 'ok',
-                'warnings': '; '.join(warnings),
-            })
-            matched += 1
+            for _, av_row in hit.iterrows():
+                records.append({
+                    'input_id': row['input_id'],
+                    'input_egid': row['input_egid'],
+                    'input_lon': row['input_lon'],
+                    'input_lat': row['input_lat'],
+                    'av_egid': av_row['av_egid'],
+                    'fid': av_row['fid'],
+                    'area_official_m2': av_row['area_official_m2'],
+                    'geometry': av_row['geometry'],
+                    'status_step1': 'ok',
+                    'warnings': '; '.join(warnings),
+                })
+                matched += 1
         else:
             records.append({
                 'input_id': row['input_id'],

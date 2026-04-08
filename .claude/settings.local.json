@@ -4,7 +4,9 @@
       "WebFetch(domain:docs.geo.admin.ch)",
       "Read(//d/Nacherfassung BBL/**)",
       "Bash(tee data/output/_portfolio_run.log)",
-      "Bash(curl -s \"https://api3.geo.admin.ch/rest/services/ech/MapServer/find?layer=ch.bfs.gebaeude_wohnungs_register&searchText=1231641&searchField=egid&returnGeometry=false&contains=false\")"
+      "Bash(curl -s \"https://api3.geo.admin.ch/rest/services/ech/MapServer/find?layer=ch.bfs.gebaeude_wohnungs_register&searchText=1231641&searchField=egid&returnGeometry=false&contains=false\")",
+      "Bash(ls -la data/example_*.csv data/example_*.log)",
+      "Bash(ls -la \"D:/Nacherfassung BBL/\"Gebäude_IN_*.csv \"D:/Nacherfassung BBL/\"Gebäude_IN_*.log)"
     ]
   }
 }

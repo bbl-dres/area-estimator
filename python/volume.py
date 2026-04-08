@@ -399,11 +399,11 @@ def calculate_building_volume(polygon, tile_index, av_egid=None, fid=None,
         height_max = np.max(building_heights)
         height_minimal = volume / footprint_area if footprint_area > 0 else 0
 
+        # Spread empty_result first so any future column added to the
+        # factory automatically lands in the success branch too. This is
+        # the drift hazard that previously dropped the `warnings` field.
         return {
-            'av_egid': av_egid,
-            'fid': fid,
-            'area_footprint_m2': round(footprint_area, 2),
-            'area_official_m2': area_official_m2,
+            **empty_result,
             'volume_above_ground_m3': round(volume, 2),
             'elevation_base_min_m': round(base_min, 2),
             'elevation_base_mean_m': round(base_mean, 2),

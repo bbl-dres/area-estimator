@@ -30,13 +30,16 @@ from tile_fetcher import ensure_tiles, tile_ids_from_bounds
 from area import enrich_with_gwr, estimate_floor_area
 
 
-def setup_logging(output_path, timestamp):
-    """Configure file + console logging. Log file is named with `timestamp`
-    and dropped next to the output CSV. Idempotent if main() runs more than
-    once in the same process (e.g. from a notebook or test runner)."""
-    log_dir = Path(output_path).parent
+def setup_logging(output_path):
+    """Configure file + console logging. The log file lives next to the
+    output CSV and shares its stem (so ``Gebäude_IN_20260408_1542.csv``
+    pairs with ``Gebäude_IN_20260408_1542.log``). Idempotent if main()
+    runs more than once in the same process (e.g. from a notebook or
+    test runner)."""
+    output_path = Path(output_path)
+    log_dir = output_path.parent
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / f"run_{timestamp}.log"
+    log_file = log_dir / f"{output_path.stem}.log"
 
     file_handler = logging.FileHandler(log_file, encoding="utf-8")
     file_handler.setLevel(logging.DEBUG)
@@ -96,7 +99,13 @@ def main():
 
     # Output
     parser.add_argument('-o', '--output',
-                        help='Output CSV file path (default: data/output/result_<timestamp>.csv)')
+                        help='Output CSV file path. A YYYYMMDD_HHMM timestamp '
+                             'is appended to the stem. If omitted, the output '
+                             'is dropped next to --csv (named after its stem) '
+                             'when --csv is given, otherwise into '
+                             'data/output/result_<timestamp>.csv. The log '
+                             'file is written next to the CSV with a matching '
+                             'name (same stem, .log extension).')
 
     # Filters
     parser.add_argument('-l', '--limit', type=int,
@@ -115,18 +124,27 @@ def main():
 
     args = parser.parse_args()
 
-    # One timestamp drives the output filename and the log filename so they
-    # always agree (the previous code computed two timestamps a fraction of
-    # a second apart).
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    if not args.output:
-        args.output = str(Path("data/output") / f"result_{timestamp}.csv")
-    else:
+    # ── Output path & timestamp ───────────────────────────────────────────
+    # YYYYMMDD_HHMM matches the web app's export naming. The same timestamp
+    # is reused below for the log file (via setup_logging) so the .csv and
+    # .log always agree on the suffix.
+    #
+    # Resolution order:
+    #   1. --output explicitly set: append timestamp to user-provided path
+    #   2. --csv given: drop output next to the CSV, named after its stem
+    #   3. neither: fall back to data/output/result_<timestamp>.csv
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    if args.output:
         p = Path(args.output)
         args.output = str(p.parent / f"{p.stem}_{timestamp}{p.suffix}")
+    elif args.csv:
+        csv_path = Path(args.csv)
+        args.output = str(csv_path.parent / f"{csv_path.stem}_{timestamp}.csv")
+    else:
+        args.output = str(Path("data/output") / f"result_{timestamp}.csv")
 
     # ── Logging ────────────────────────────────────────────────────────────
-    log_file = setup_logging(args.output, timestamp)
+    log_file = setup_logging(args.output)
     log = logging.getLogger("main")
     log.info(f"Log file: {log_file}")
 

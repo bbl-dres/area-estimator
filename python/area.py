@@ -108,7 +108,6 @@ STATUS_SUCCESS = 'success'
 STATUS_NO_FOOTPRINT = 'no_footprint'
 STATUS_NO_VOLUME = 'no_volume'
 STATUS_HEIGHT_EXCEEDS_CAP = f'height_exceeds_{HEIGHT_SANITY_CAP_M}m'
-STATUS_SKIPPED = 'skipped'
 
 
 def _to_gwr_code(value):
@@ -169,9 +168,20 @@ _ACCURACY_INDUSTRIAL_GKLAS = {1251, 1252, 1265, 1272}
 _ACCURACY_INDUSTRIAL_GKAT = {1060, 1080}
 
 
-def determine_accuracy(gkat, gklas, has_volume, has_footprint):
-    """Determine accuracy bucket from data quality and building type."""
+def determine_accuracy(gkat, gklas, has_volume, has_footprint, floor_height_source=None):
+    """
+    Determine accuracy bucket from data quality and building type.
+
+    If ``floor_height_source == 'DEFAULT'`` the floor-height lookup fell
+    through to the residential default, meaning we have no class match for
+    this building. Force LOW accuracy in that case so the output is honest
+    about the uncertainty (and consistent with the warning that
+    ``estimate_floor_area`` appends in the same path).
+    """
     if not has_volume or not has_footprint:
+        return ACCURACY_LOW
+
+    if floor_height_source == 'DEFAULT':
         return ACCURACY_LOW
 
     gkat_int = _to_gwr_code(gkat)
@@ -263,9 +273,10 @@ def estimate_floor_area(volume_result):
         append_warning(result, 'no GWR class match — using default floor height')
 
     # Floor count = height_minimal ÷ floor_height, capped at GWR gastw if available.
+    # `gastw_int or MAX_FLOORS_FALLBACK` treats both None and 0 as "no cap available".
     floors_estimate = max(1.0, height_minimal / floor_height)
     gastw_int = _to_gwr_code(result.get('gastw'))
-    max_floors = gastw_int if gastw_int and gastw_int > 0 else MAX_FLOORS_FALLBACK
+    max_floors = gastw_int or MAX_FLOORS_FALLBACK
     floors_estimate = min(floors_estimate, float(max_floors))
 
     # Gross floor area uses the unrounded estimate so it stays consistent
@@ -275,6 +286,7 @@ def estimate_floor_area(volume_result):
     accuracy = determine_accuracy(
         gkat, gklas,
         has_volume=True, has_footprint=True,
+        floor_height_source=source,
     )
 
     result['area_floor_total_m2'] = round(area_estimate, 2)
@@ -305,6 +317,10 @@ GWR_COLUMNS = {
     'GBAUJ': 'gbauj',
     'GASTW': 'gastw',
 }
+
+# The four attribute fields we want from any GWR source (CSV or API).
+# Used by both query_gwr_api and enrich_with_gwr.
+_GWR_OUTPUT_COLS = ('gkat', 'gklas', 'gbauj', 'gastw')
 
 GWR_FIND_URL = "https://api3.geo.admin.ch/rest/services/ech/MapServer/find"
 
@@ -350,7 +366,7 @@ def query_gwr_api(egid):
     ``searchField=egid``, which returns full feature attributes in a single
     request — replacing the older Search → Detail two-call pattern.
     """
-    result = {'gkat': None, 'gklas': None, 'gbauj': None, 'gastw': None}
+    result = {col: None for col in _GWR_OUTPUT_COLS}
 
     egid_int = _to_gwr_code(egid)
     if egid_int is None:
@@ -390,14 +406,11 @@ def query_gwr_api(egid):
     else:
         attrs = feature.get('attributes') or {}
 
-    for col in ('gkat', 'gklas', 'gbauj', 'gastw'):
+    for col in _GWR_OUTPUT_COLS:
         if col in attrs:
             result[col] = attrs[col]
 
     return result
-
-
-_GWR_OUTPUT_COLS = ('gkat', 'gklas', 'gbauj', 'gastw')
 
 
 def enrich_with_gwr(buildings_df, gwr_csv_path=None):
@@ -463,7 +476,9 @@ def enrich_with_gwr(buildings_df, gwr_csv_path=None):
         t0 = time.monotonic()
         matched = 0
         completed = 0
-        progress_step = max(50, n_with_egid // 20)  # ~20 progress lines
+        # ~20 progress lines, but always at least every 5 requests for small
+        # batches and never more than every 50 for very large ones.
+        progress_step = max(5, min(50, n_with_egid // 20 or 1))
 
         with ThreadPoolExecutor(max_workers=GWR_API_MAX_WORKERS) as ex:
             future_to_idx = {

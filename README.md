@@ -168,7 +168,7 @@ flowchart TD
 | `--surface3d DIR` | yes | Directory with swissSURFACE3D GeoTIFF tiles |
 | `--auto-fetch` | | Automatically download missing tiles from swisstopo |
 | **Output** | | |
-| `-o, --output FILE` | | Output CSV file path (default: `data/output/result_<timestamp>.csv`) |
+| `-o, --output FILE` | | Output CSV file path. A `YYYYMMDD_HHMM` timestamp (matching the web app's export naming) is appended to the stem. If omitted, the output is dropped **next to `--csv`** (named `<csv_stem>_<timestamp>.csv`) when `--csv` is given, otherwise into `data/output/result_<timestamp>.csv`. The log file is written next to the CSV with a matching name (same stem, `.log` extension), so e.g. `Gebäude_IN_20260408_1542.csv` pairs with `Gebäude_IN_20260408_1542.log`. |
 | **Filters** | | |
 | `-l, --limit N` | | Process only the first N buildings |
 | `-b, --bbox MIN_LON MIN_LAT MAX_LON MAX_LAT` | | Bounding box filter in WGS84 (only in all-buildings mode, i.e. without `--csv`) |
@@ -280,9 +280,27 @@ Estimates gross floor area by dividing building height by a typical floor height
 | `floor_height_source` | Where the floor height came from: `GKLAS` (specific class), `GKAT` (broader category), or `DEFAULT` (no GWR class match — appended to `warnings`) |
 | `floors_estimated` | Estimated floors: `height_minimal ÷ floor_height`, capped at GWR `gastw` if available |
 | `area_floor_total_m2` | Gross floor area: `footprint × estimated floors` (m²) |
-| `area_accuracy` | `high` (±10–15%) / `medium` (±15–25%) / `low` (±25–40%) |
+| `area_accuracy` | `high` (±10–15%) / `medium` (±15–25%) / `low` (±25–40%) — see decision tree below |
 | `building_type` | Human-readable building type |
 | `warnings` | `;`-joined data-quality notes accumulated across all four steps (empty when nothing to report) |
+
+#### How `area_accuracy` is computed
+
+Each successful Step 4 row gets one of three buckets — `high`, `medium`, or `low` — assigned by a small decision tree that bakes in two things: (1) **how reliable the GWR class data is for this row**, and (2) **how uniform the floor heights are for that building type**. The tree is evaluated top to bottom and the first matching rule wins:
+
+| # | Condition | Result | Reason |
+|---|---|---|---|
+| 1 | Volume or footprint missing | **low** | No measurement to be confident about |
+| 2 | `floor_height_source == DEFAULT` (no GWR class match) | **low** | Falling back to 3.0 m residential default; the assumption is weak |
+| 3 | Both `gkat` and `gklas` are missing | **low** | No type information at all |
+| 4 | `gkat == 1020` OR `1100 ≤ gklas < 1200` (residential) | **high** | Residential floor heights are the most uniform across the Swiss stock (~2.7–3.0 m almost everywhere). This is the best-supported category in the [Height Assumptions study](docs/Height%20Assumptions.md) |
+| 5 | `gklas ∈ {1220, 1230, 1231, 1263, 1264}` (offices, retail, restaurants, schools, hospitals) | **medium** | Tighter than industrial, looser than residential. Floor heights typically 3.3–4.2 m |
+| 6 | `gklas ∈ {1251, 1252, 1265, 1272}` OR `gkat ∈ {1060, 1080}` (industrial, silos, sports halls, churches, non-residential, special-purpose) | **low** | Floor heights legitimately span 4–7 m or more — high real-world variance, low confidence in any single estimate |
+| 7 | Anything else | **medium** | Catch-all for codes not explicitly listed (hotels, parking garages, agricultural, museums, etc.) |
+
+The percentage tolerances (`±10–15%`, etc.) are estimated confidence intervals based on the Seiler & Seiler 2020 methodology and Swiss regulatory anchors. They are not measured against ground-truth drawings — see [docs/Height Assumptions.md](docs/Height%20Assumptions.md) for the full validation study, including a per-GWR-code confidence assessment from independent regulatory sources (ArGV4, SIA 2024, cantonal building codes).
+
+> **Note:** The decision tree above is a 3-level simplification of the 5-level qualitative scale (`Low / Low-Medium / Medium / Medium-High / High`) used in the validation study. The two are not perfectly aligned — see the study for the per-code breakdown if you need finer granularity than `low/medium/high`.
 
 ---
 
@@ -411,6 +429,8 @@ Story heights per building class, used by Step 4 to convert volume into floor co
 | Outer wall quantities | Estimate exterior wall areas from footprint perimeter and height metrics |
 | Material classification | Building material detection from imagery or other data sources |
 | International buildings | Extend beyond Switzerland using alternative elevation and cadastral data |
+| Eaves-height floor count | Use `elevation_roof_min − elevation_base_min` (≈ eaves height for pitched roofs) as the input to floor counting instead of `height_minimal`. Equivalent for flat roofs, more accurate for SFH/MFH with attics: `height_minimal` sits between eaves and ridge and slightly over-counts floors. Cheap to add as an extra `height_eaves_m` column in Step 3. |
+| Voxel-slice GFA estimation | Replace `footprint × floors` with horizontal slab integration over the per-cell heightfield: for each slab `k`, count cells where building height ≥ slab ceiling, multiply by cell area, sum across slabs. Naturally handles setbacks, attics, towers, dormers, and stepped buildings — cases where the current method silently overcounts because it assumes every floor is the full footprint. Open questions to investigate: (1) cell-qualification rule (strict vs. centerline vs. tunable threshold for partial floors), (2) sensitivity to the assumed floor height, (3) handling of trees-over-buildings noise, (4) per-floor slab areas in the output as a JSON column. Should be opt-in via `--gfa-method slice` and validated against buildings with known drawings before becoming the default. |
 
 ---
 

@@ -76,7 +76,7 @@ def _download_tile(tile_id, url_template, output_dir, label):
                     f.write(chunk)
             tmp.replace(dest)
 
-            elapsed = time.monotonic() - t0
+            elapsed = max(time.monotonic() - t0, 1e-6)  # avoid /0 on cached fast paths
             log.debug("%s %s: done (%.0fs, %.1f MB/s)", label, tile_id, elapsed, size_mb / elapsed)
             return True
 
