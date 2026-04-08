@@ -346,6 +346,12 @@ area-estimator/
 
 ## Floor Height Lookup
 
+Story heights per building class, used by Step 4 to convert volume into floor count.
+
+- **GF** = ground floor (German: *Erdgeschoss*, EG). The first storey of the building.
+- **UF** = upper floor (German: *Regelgeschoss*, RG). The "typical" non-ground storey above.
+- **min–max** is a validation range observed across real buildings of that class. It is not used as a confidence interval — Step 4 collapses all four numbers into a single representative floor height (`(GF_min + GF_max + UF_min + UF_max) / 4`) and computes `floors = height ÷ floor_height`. The ranges are kept for cross-checking against known buildings, not to drive the math.
+
 | Code | Building Type | Schema | GF (m) | UF (m) |
 |------|---------------|--------|--------|--------|
 | 1010 | Provisional shelter | GKAT | 2.70–3.30 | 2.70–3.30 |
