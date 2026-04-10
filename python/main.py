@@ -25,6 +25,7 @@ from footprints import (
     load_footprints_from_file,
     load_footprints_from_av_with_egids,
     load_footprints_from_av_with_coordinates,
+    load_footprints_from_api_with_egids,
 )
 from volume import (
     STATUS_OK,
@@ -229,13 +230,15 @@ def main() -> int:
                     'estimates building volumes and floor areas from elevation models'
     )
 
-    # Input: building footprints. Three modes:
+    # Input: building footprints. Four modes:
     #   --footprints only                       → all buildings in the AV file
     #   --footprints + --csv                    → EGID match (default for CSV input)
     #   --footprints + --csv --use-coordinates  → spatial join via lon/lat
-    parser.add_argument('--footprints', required=True,
+    #   --csv --use-api                         → API cascade (no local AV file needed)
+    parser.add_argument('--footprints',
                         help='Geodata file with building footprints '
-                             '(GeoPackage, Shapefile, or GeoJSON from Amtliche Vermessung).')
+                             '(GeoPackage, Shapefile, or GeoJSON from Amtliche Vermessung). '
+                             'Not required when using --use-api.')
     parser.add_argument('--csv',
                         help='CSV input file. By default looks up buildings by `egid` '
                              '(columns: id, egid). With --use-coordinates, instead does a '
@@ -245,6 +248,11 @@ def main() -> int:
                         help='Match buildings via lon/lat spatial join instead of EGID. '
                              'Required only for buildings that have no EGID assigned in '
                              'the cadastral data; EGID match is faster and unambiguous.')
+    parser.add_argument('--use-api', action='store_true',
+                        help='Fetch building footprints via API instead of a local AV '
+                             'file. Uses GWR → geodienste.ch WFS → swisstopo vec25 '
+                             'cascade. Requires --csv with id/egid columns. '
+                             'No --footprints needed.')
 
     # Input: elevation tiles
     parser.add_argument('--alti3d', required=True,
@@ -308,6 +316,16 @@ def main() -> int:
     log.info(f"Log file: {log_file}")
 
     # ── Validate inputs ────────────────────────────────────────────────────
+    if args.use_api and not args.csv:
+        log.error("--use-api requires --csv (with id/egid columns)")
+        return 1
+    if args.use_api and args.use_coordinates:
+        log.error("--use-api and --use-coordinates are mutually exclusive")
+        return 1
+    if not args.use_api and not args.footprints:
+        log.error("--footprints is required (unless using --use-api)")
+        return 1
+
     alti3d_dir = Path(args.alti3d)
     surface3d_dir = Path(args.surface3d)
 
@@ -332,7 +350,12 @@ def main() -> int:
         return 1
 
     try:
-        if args.csv and args.use_coordinates:
+        if args.use_api:
+            log.info("Mode: API cascade (GWR → WFS → vec25)")
+            buildings = load_footprints_from_api_with_egids(
+                args.csv, limit=args.limit,
+            )
+        elif args.csv and args.use_coordinates:
             log.info("Mode: AV + CSV (lon/lat spatial join)")
             buildings = load_footprints_from_av_with_coordinates(
                 args.footprints, args.csv, limit=args.limit,

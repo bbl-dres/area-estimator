@@ -17,7 +17,12 @@ export const API = {
   WFS_AV: "https://geodienste.ch/db/av_0/deu",
   /** swisstopo MapServer find — exact attribute search (GWR EGID lookup) */
   GWR_FIND: "https://api3.geo.admin.ch/rest/services/ech/MapServer/find",
+  /** swisstopo MapServer identify — vec25 building footprint fallback */
+  VEC25_IDENTIFY: "https://api3.geo.admin.ch/rest/services/ech/MapServer/identify",
 };
+
+/** Cantons where geodienste.ch WFS data is not freely available */
+export const WFS_BLOCKED_CANTONS = new Set(["JU", "LU", "VD"]);
 
 /** COG tile URL templates */
 export const ALTI3D_URL = "https://data.geo.admin.ch/ch.swisstopo.swissalti3d/swissalti3d_{year}_{tile}/swissalti3d_{year}_{tile}_0.5_2056_5728.tif";

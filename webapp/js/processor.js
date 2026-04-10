@@ -6,8 +6,10 @@
  * 4. Optionally estimate floor areas via GWR lookup
  */
 
-import { API, CONCURRENCY, STATUS, getFloorHeight, determineAccuracy } from "./config.js";
-import { toLV95, preloadTiles, computeVolumeSync, polygonAreaLV95 } from "./elevation.js";
+import { API, CONCURRENCY, STATUS, WFS_BLOCKED_CANTONS, getFloorHeight, determineAccuracy } from "./config.js";
+import { toLV95, fromLV95, preloadTiles, computeVolumeSync, polygonAreaLV95 } from "./elevation.js";
+
+/* global turf */
 
 let cancelled = false;
 
@@ -114,16 +116,16 @@ export async function processRows(rows, onProgress) {
       result.status = STATUS.SUCCESS;
       succeeded++;
 
-      // Try GWR lookup for floor area estimation
+      // Try GWR lookup for floor area estimation (reuses cache from footprint fetch)
       const egid = footprint.egid || row.egid;
       if (egid) {
         try {
-          const gwr = await fetchGWR(egid);
+          const gwr = await fetchGWRAttributes(egid);
           if (gwr) {
-            result.gkat = gwr.gkat;
-            result.gklas = gwr.gklas;
-            result.gbauj = gwr.gbauj;
-            result.gastw = gwr.gastw;
+            result.gkat = gwr.gkat || null;
+            result.gklas = gwr.gklas || null;
+            result.gbauj = gwr.gbauj || null;
+            result.gastw = gwr.gastw || null;
           }
         } catch (e) {
           // GWR lookup failure is non-fatal
@@ -202,22 +204,43 @@ export async function processRows(rows, onProgress) {
 // =============================================
 
 /**
- * Fetch building footprint geometry from AV WFS.
- * Uses bounding box query around the given coordinates.
+ * Fetch building footprint geometry from AV WFS, with vec25 fallback.
+ *
+ * Cascade: GWR (location + canton) → WFS (skip for blocked cantons) → vec25.
+ * The GWR result is cached and reused for floor area estimation in Step 4,
+ * so the extra call costs nothing.
  */
 async function fetchFootprint(row) {
   const lon = parseFloat(row.lon);
   const lat = parseFloat(row.lat);
   const egid = row.egid ? String(row.egid).trim() : null;
 
-  // Strategy 1: If we have EGID, query AV WFS directly by GWR_EGID filter
+  // Strategy 1: EGID-based lookup
   if (egid) {
-    return await fetchFootprintByEGID(egid);
+    // Fetch GWR first — gives us canton (for skip) + coords (for vec25 fallback).
+    // Result is cached so the Step 4 floor-area lookup won't re-fetch.
+    const gwr = await fetchGWRAttributes(egid);
+    const blocked = gwr && WFS_BLOCKED_CANTONS.has(gwr.gdekt);
+
+    if (!blocked) {
+      const wfsResult = await fetchFootprintByEGID(egid);
+      if (wfsResult) return wfsResult;
+    }
+
+    // WFS skipped or missed → try vec25 fallback
+    if (gwr && gwr.gkode != null) {
+      return await fetchFootprintFromVec25(gwr.gkode, gwr.gkodn, egid);
+    }
   }
 
-  // Strategy 2: If we have coordinates, query WFS with bbox
+  // Strategy 2: Coordinate-based lookup
   if (!isNaN(lon) && !isNaN(lat)) {
-    return await fetchFootprintByCoords(lon, lat, egid);
+    const wfsResult = await fetchFootprintByCoords(lon, lat, egid);
+    if (wfsResult) return wfsResult;
+
+    // WFS miss → try vec25 fallback with LV95 coords
+    const [e, n] = toLV95(lon, lat);
+    return await fetchFootprintFromVec25(e, n, egid);
   }
 
   return null;
@@ -271,14 +294,8 @@ async function fetchFootprintByCoords(lon, lat, egid) {
 
     if (!best) return null;
 
-    // Normalize geometry to Polygon
-    let geom = best.geometry;
-    if (geom.type === "MultiPolygon") {
-      geom = { type: "Polygon", coordinates: geom.coordinates[0] };
-    }
-
     return {
-      geometry: geom,
+      geometry: largestPolygon(best.geometry),
       egid: best.properties.egid || best.properties.EGID || egid,
       area: best.properties.flaeche || best.properties.Flaeche || best.properties.area || null,
     };
@@ -306,13 +323,8 @@ async function fetchFootprintByEGID(egid) {
     if (!data.features || data.features.length === 0) return null;
 
     const feature = data.features[0];
-    let geom = feature.geometry;
-    if (geom.type === "MultiPolygon") {
-      geom = { type: "Polygon", coordinates: geom.coordinates[0] };
-    }
-
     return {
-      geometry: geom,
+      geometry: largestPolygon(feature.geometry),
       egid: feature.properties.GWR_EGID || egid,
       area: null,
     };
@@ -323,28 +335,42 @@ async function fetchFootprintByEGID(egid) {
 }
 
 // =============================================
-// GWR lookup
+// GWR lookup (single cache for location + classification)
 // =============================================
 
 const gwrCache = new Map();
 
-async function fetchGWR(egid) {
+/**
+ * Fetch a building's full GWR attributes: coordinates (gkode, gkodn),
+ * canton (gdekt), and classification (gkat, gklas, gbauj, gastw).
+ *
+ * Single HTTP call per EGID, cached. Used by both the footprint cascade
+ * (for canton + coords) and floor area estimation (for classification).
+ */
+async function fetchGWRAttributes(egid) {
   if (!egid) return null;
   const key = String(egid).trim();
   if (gwrCache.has(key)) return gwrCache.get(key);
 
   try {
-    // Exact EGID match via MapServer find
-    const findUrl = `${API.GWR_FIND}?layer=ch.bfs.gebaeude_wohnungs_register` +
+    const url = `${API.GWR_FIND}?layer=ch.bfs.gebaeude_wohnungs_register` +
       `&searchText=${encodeURIComponent(key)}&searchField=egid&returnGeometry=false&contains=false`;
-    const resp = await fetchWithTimeout(findUrl, 10000);
+    const resp = await fetchWithTimeout(url, 10000);
     if (!resp.ok) { gwrCache.set(key, null); return null; }
     const data = await resp.json();
 
-    if (!data.results || data.results.length === 0) { gwrCache.set(key, null); return null; }
+    if (!data.results || data.results.length === 0) {
+      gwrCache.set(key, null);
+      return null;
+    }
 
-    const attrs = data.results[0].attributes || {};
+    const attrs = data.results[0].attributes || data.results[0].properties || {};
     const result = {
+      // Location
+      gkode: attrs.gkode ?? null,
+      gkodn: attrs.gkodn ?? null,
+      gdekt: attrs.gdekt || "",
+      // Classification
       gkat: attrs.gkat || null,
       gklas: attrs.gklas || null,
       gbauj: attrs.gbauj || null,
@@ -357,6 +383,106 @@ async function fetchGWR(egid) {
     // Don't cache network errors — allow retry on transient failures
     return null;
   }
+}
+
+// =============================================
+// vec25 fallback (swisstopo identify)
+// =============================================
+
+/**
+ * Fetch building footprint from swisstopo vec25 identify endpoint.
+ * Lower accuracy (~2-year update cycle) but covers the whole country.
+ *
+ * Queries in LV95, does point-in-polygon in LV95 (more accurate than
+ * WGS84 for Swiss coordinates), converts only the matched geometry
+ * to WGS84 for the rest of the pipeline.
+ *
+ * @param {number} gkode - LV95 easting
+ * @param {number} gkodn - LV95 northing
+ * @param {string|null} egid - EGID for reference
+ * @returns {{ geometry, egid, area } | null}
+ */
+async function fetchFootprintFromVec25(gkode, gkodn, egid) {
+  // imageDisplay=500,500,96 with mapExtent ±250m → 1m/px, tolerance=50 → 50m radius
+  const buf = 250;
+  const me = `${gkode - buf},${gkodn - buf},${gkode + buf},${gkodn + buf}`;
+
+  const url = `${API.VEC25_IDENTIFY}?geometryType=esriGeometryPoint` +
+    `&geometry=${gkode},${gkodn}` +
+    `&layers=all:ch.swisstopo.vec25-gebaeude` +
+    `&tolerance=50&sr=2056&returnGeometry=true&geometryFormat=geojson` +
+    `&imageDisplay=500,500,96&mapExtent=${me}`;
+
+  try {
+    const resp = await fetchWithTimeout(url, 15000);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+
+    if (!data.results || data.results.length === 0) return null;
+
+    // Point-in-polygon in LV95 — more accurate and avoids converting
+    // every candidate to WGS84. Only the match gets converted.
+    let best = null;
+    let bestDist = Infinity;
+
+    for (const r of data.results) {
+      const g = r.geometry;
+      if (!g || (g.type !== "Polygon" && g.type !== "MultiPolygon")) continue;
+
+      const poly = largestPolygon(g);
+      const feature = turf.feature(poly);
+      const pt = turf.point([gkode, gkodn]);
+
+      if (turf.booleanPointInPolygon(pt, feature)) {
+        best = poly;
+        break;
+      }
+      const dist = turf.distance(pt, turf.centroid(feature));
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = poly;
+      }
+    }
+
+    if (!best) return null;
+
+    // Convert matched LV95 geometry to WGS84
+    const wgs84Geom = {
+      type: "Polygon",
+      coordinates: best.coordinates.map((ring) =>
+        ring.map((c) => fromLV95(c[0], c[1]))
+      ),
+    };
+
+    return { geometry: wgs84Geom, egid: egid || null, area: null };
+  } catch (err) {
+    console.warn("vec25 identify query failed:", err);
+    return null;
+  }
+}
+
+// =============================================
+// Geometry helpers
+// =============================================
+
+/**
+ * Normalize a GeoJSON geometry to a single Polygon.
+ * MultiPolygons are reduced to their largest component by area.
+ */
+function largestPolygon(geom) {
+  if (geom.type === "Polygon") return geom;
+  if (geom.type !== "MultiPolygon") return geom;
+
+  let bestCoords = geom.coordinates[0];
+  let bestArea = 0;
+  for (const polyCoords of geom.coordinates) {
+    const a = turf.area(turf.polygon(polyCoords));
+    if (a > bestArea) {
+      bestArea = a;
+      bestCoords = polyCoords;
+    }
+  }
+  return { type: "Polygon", coordinates: bestCoords };
 }
 
 // =============================================

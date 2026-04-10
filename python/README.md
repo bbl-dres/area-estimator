@@ -25,9 +25,10 @@ pip install -r python/requirements-dev.txt
 | Argument | Required | Description |
 |----------|:--------:|-------------|
 | **Input** | | |
-| `--footprints FILE` | yes | Geodata file with building polygons (GeoPackage, Shapefile, or GeoJSON from AV). Alone: processes all buildings in the file. |
-| `--csv FILE` | no | CSV input file. **Default mode:** columns `id`, `egid` — each EGID is matched against `GWR_EGID` in the AV file via a single push-down query (one I/O for the whole batch, fast). With `--use-coordinates`: columns `id`, `lon`, `lat` — performs a strict point-in-polygon spatial join instead. Comma- and semicolon-delimited CSVs are both accepted. Unmatched rows are reported as `no_footprint`. |
+| `--footprints FILE` | * | Geodata file with building polygons (GeoPackage, Shapefile, or GeoJSON from AV). Alone: processes all buildings in the file. Required unless `--use-api` is set. |
+| `--csv FILE` | no | CSV input file. **Default mode:** columns `id`, `egid` — each EGID is matched against `GWR_EGID` in the AV file via a single push-down query (one I/O for the whole batch, fast). With `--use-coordinates`: columns `id`, `lon`, `lat` — performs a strict point-in-polygon spatial join instead. With `--use-api`: columns `id`, `egid` — fetches footprints from public APIs instead of a local AV file. Comma- and semicolon-delimited CSVs are both accepted. Unmatched rows are reported as `no_footprint`. |
 | `--use-coordinates` | no | Switch `--csv` from EGID match to lon/lat spatial join. Required only for buildings that have no EGID assigned in the cadastral data. |
+| `--use-api` | no | Fetch building footprints via API instead of a local AV file. Uses a three-step cascade: **GWR** (coordinates + canton) → **geodienste.ch WFS** (official AV footprint) → **swisstopo vec25** (lower-accuracy fallback). No `--footprints` needed. Requires `--csv` with `id`/`egid` columns. See **API mode** below. |
 | **Elevation data** | | |
 | `--alti3d DIR` | yes | Directory with swissALTI3D GeoTIFF tiles |
 | `--surface3d DIR` | yes | Directory with swissSURFACE3D GeoTIFF tiles |
@@ -72,6 +73,15 @@ python python/main.py \
     --estimate-area --gwr-csv data/gwr/buildings.csv \
     -o results/ch_all_buildings.csv
 
+# API mode — no local AV file, fetches footprints from public APIs
+python python/main.py \
+    --csv data/example.csv \
+    --use-api \
+    --alti3d "D:\SwissAlti3D" \
+    --surface3d "D:\swissSURFACE3D Raster" \
+    --estimate-area \
+    -o portfolio_volumes.csv
+
 # Quick test with auto-fetch (no local elevation data needed)
 python python/main.py \
     --footprints data/av/ch_av_2056.gpkg \
@@ -89,7 +99,7 @@ python python/main.py \
 ```
 python/
 ├── main.py                         CLI entry point + aggregate_by_input_id
-├── footprints.py                   Step 1: load footprints / coordinates
+├── footprints.py                   Step 1: load footprints (AV file / API cascade)
 ├── volume.py                       Steps 2 + 3: aligned grid + volume + heights
 │                                   Also: BuildingResult TypedDict, STATUS_* constants
 ├── tile_fetcher.py                 On-demand tile download from swisstopo
@@ -109,11 +119,31 @@ All results are written to a single CSV file. The output naming convention puts 
 
 ### Step 1 — Footprints
 
-Three modes, automatically selected based on which flags are provided:
+Four modes, automatically selected based on which flags are provided:
 
 - **AV only** (`--footprints`): Loads all building polygons from the geodata file and filters to buildings (`Art = Gebaeude`). Converts to LV95 if needed. The `GWR_EGID` column is renamed to `av_egid`; each feature gets an `fid`.
 - **AV + CSV by EGID** (`--footprints` + `--csv`, default): Each input row's `egid` is matched against `GWR_EGID` in the AV file via a single push-down query — fast and unambiguous. The cell may contain a single EGID *or* a list of EGIDs separated by **any combination of `,`, `/`, `;`, or whitespace** (real-world colleague CSVs use all of them, often mixed). Every cell goes through a cleanup pass first that collapses tabs, line breaks, NBSPs, and double spaces — so `"1234,\n5678"`, `"1234 / 5678"`, and `"1234;5678"` all parse the same way. Each EGID is looked up independently and the results are joined back to one output row per input CSV row (see "Array aggregation" below). EGIDs not present in AV get `status_step1 = no_footprint`. Cells that contain no parseable positive integer get `status_step1 = invalid_egid`. **This is the same input format the web app uses** — `data/example.csv` works in both tools.
 - **AV + CSV by lon/lat** (`--footprints` + `--csv` + `--use-coordinates`): Strict point-in-polygon spatial join. Slower but works for buildings that have no EGID assigned in the cadastral data. Points with no matching polygon get `status_step1 = no_footprint`.
+- **API mode** (`--csv` + `--use-api`): Fetches building footprints from public APIs — no local AV GeoPackage file needed. See **API mode** below.
+
+#### API mode
+
+When `--use-api` is set, Step 1 fetches footprints entirely via public APIs (no `--footprints` file required). For each EGID, it runs a three-step cascade:
+
+1. **GWR lookup** (`api3.geo.admin.ch/MapServer/find`) — resolves the EGID to LV95 coordinates (`gkode`/`gkodn`) and a two-letter canton abbreviation (`gdekt`). No auth required.
+2. **geodienste.ch WFS** (`geodienste.ch/db/av_0/deu`) — fetches official AV building footprints within a 50 m bounding box around the GWR point. Skipped for cantons that don't publish data on geodienste.ch (currently **JU**, **LU**, **VD**). No auth required for free cantons.
+3. **swisstopo vec25 fallback** (`api3.geo.admin.ch/MapServer/identify`) — lower-accuracy building footprints (~2-year update cycle) that cover the entire country. Used when the WFS is skipped or returns empty.
+
+When multiple candidates are returned, a point-in-polygon check against the GWR coordinate selects the correct building. If no exact hit, the nearest candidate is used.
+
+Output columns are identical to the AV-based modes. Differences:
+- `av_egid` is `None` for vec25-sourced footprints (vec25 carries no EGID — the input EGID is preserved in `input_egid`).
+- `fid` is a synthetic `api_1`, `api_2`, … identifier (no AV feature ID).
+- A warning is appended for vec25 footprints: `footprint from vec25 (lower accuracy, ~2-year update cycle)`.
+
+API calls are parallelised with 10 concurrent workers. For a 100-building portfolio, expect ~30 s total (dominated by network latency, ~2–3 HTTP calls per building).
+
+> **Blocked cantons** are maintained in `_WFS_BLOCKED_CANTONS` in [footprints.py](footprints.py). Last verified 2026-04-10 at [geodienste.ch/services/av](https://www.geodienste.ch/services/av). If you gain access to additional cantons, update the set.
 
 #### Array aggregation: one output row per input row
 
@@ -207,6 +237,9 @@ The `warnings` column accumulates `;`-joined data-quality notes from every pipel
 | Step 1 | `Input cell contained N EGIDs: 1234, 5678` | The cell contained multiple EGIDs separated by `,`, `/`, `;`, whitespace, or any combination. Each was looked up independently in AV and then aggregated back to one output row. | Splitting multi-EGID cells into separate input rows (one EGID per row) gives cleaner output and avoids the `;`-joined array form in the result. |
 | Step 1 | `EGID 1234567 matched N AV polygons` | One EGID appears as multiple polygon records in the AV cadastral data — typically a building split across cadastral parcels. Each polygon was processed individually and aggregated. | Usually nothing — this is a real cadastral situation. The aggregated row's numeric columns will be `;`-joined arrays showing every sub-polygon's value. |
 | Step 1 | `Point fell inside N AV polygons` | Only in `--use-coordinates` mode: the lon/lat point landed inside multiple AV polygons. | Verify the input coordinate. Overlapping AV polygons usually indicate slivers or duplicates in the cadastral data. |
+| Step 1 | `footprint from vec25 (lower accuracy, ~2-year update cycle)` | Only in `--use-api` mode: the WFS didn't return a result for this building (blocked canton or empty response), so the footprint came from swisstopo vec25. | The footprint is usable but less precise than the official AV. If accuracy matters, obtain the canton's AV data directly. |
+| Step 1 | `EGID 1234567 not found in GWR` | Only in `--use-api` mode: the GWR API returned no result for this EGID. | Check that the EGID is valid and currently registered. |
+| Step 1 | `No footprint found via wfs+vec25 (canton=XX)` | Only in `--use-api` mode: both the WFS and vec25 fallback returned empty for this building's location. | The building may be too new, demolished, or at incorrect coordinates in the GWR. |
 | Step 4 | `no GWR class match — using default floor height` | The building's `gkat`/`gklas` codes weren't found in the floor-height lookup table, so the residential default (≈3.0 m) was applied. This forces `area_accuracy = low`. | Indicative — area estimation is unreliable for this row. May indicate a GWR code newer than the lookup table or a building type the lookup doesn't cover. |
 | Aggregation | `aggregated N sub-rows from M distinct EGIDs (numeric columns are ;-joined arrays — fix the input CSV to one EGID per row)` | The input row had multi-EGID content (parsed N sub-EGIDs, M of which actually matched in AV); the output row's numeric columns are `;`-joined arrays. | Fix the source CSV: one EGID per row. The arrays in the output show exactly which sub-EGIDs contributed. |
 | Aggregation | `aggregated N AV polygons for one EGID (numeric columns are ;-joined arrays — building is split across cadastral parcels)` | A single EGID matches N polygons in AV (split across parcels). The numeric columns become `;`-joined arrays so each parcel's value is visible. | Usually nothing — this is structural to the cadastral data. Sum the array values yourself if you need a building total. |

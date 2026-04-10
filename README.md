@@ -31,7 +31,7 @@ The solution is available in three variants:
 
 The browser-based version runs entirely client-side — no backend, no installation. Upload a CSV with `id` and `egid` columns and the app will:
 
-1. Fetch building footprints from [geodienste.ch](https://geodienste.ch) WFS (`ms:LCSF`, filtered by `GWR_EGID`)
+1. Fetch building footprints from [geodienste.ch](https://geodienste.ch) WFS (`ms:LCSF`, filtered by `GWR_EGID`), with automatic [swisstopo vec25](https://api3.geo.admin.ch) fallback for cantons not on geodienste.ch
 2. Load elevation data (DTM + DSM) from [swisstopo COG tiles](https://data.geo.admin.ch) on-the-fly
 3. Compute volume and heights using an orientation-aligned 2×2m grid
 4. Look up building classification from [GWR](https://www.housing-stat.ch) via swisstopo API
@@ -51,15 +51,15 @@ The browser-based version runs entirely client-side — no backend, no installat
 
 | | Web App | Python CLI |
 |---|---|---|
-| **Data coverage** | 20 of 26 cantons via public WFS (JU, LU, NE, NW, OW, VD blocked) | All cantons via local GeoPackage |
+| **Data coverage** | All 26 cantons — WFS for most cantons, automatic vec25 fallback for blocked cantons (JU, LU, VD) | All cantons via local GeoPackage or `--use-api` (same cascade) |
 | **Elevation data** | On-the-fly COG tile loading from swisstopo CDN | Local GeoTIFF tiles (faster, offline) |
 | **Grid resolution** | 2×2m (configurable) | 1×1m (configurable) |
 | **Area calculation** | Spherical (Turf.js), ~0.1–0.5% error for spatial matching | Exact planar (LV95/EPSG:2056) |
 | **Throughput** | ~5 buildings in parallel, limited by API rate | Bulk processing with local data |
-| **EGID lookup** | Direct WFS filter by `GWR_EGID` | Local GeoPackage spatial join |
-| **Offline** | Requires internet | Fully offline with local data |
+| **EGID lookup** | Direct WFS filter by `GWR_EGID` | Local GeoPackage spatial join or API cascade |
+| **Offline** | Requires internet | Fully offline with local data (or API mode with internet) |
 
-> **Data coverage note:** The Web App uses the geodienste.ch WFS, which requires cantonal approval in 6 cantons (JU, LU, NE, NW, OW, VD). Buildings in these cantons will return "Kein Grundriss". Coverage is also incomplete in TI, VS, and NE.
+> **Data coverage note:** Most cantons are freely available via the geodienste.ch WFS. Three cantons (JU, LU, VD) don't publish data there, so both the Web App and `--use-api` mode automatically fall back to swisstopo vec25 building footprints (lower accuracy, ~2-year update cycle). Coverage can also be incomplete in TI and VS.
 
 ### Quick Start
 
@@ -80,7 +80,8 @@ Or deploy to any static hosting (GitHub Pages, Cloudflare Pages, etc.). GitHub P
 | API | Purpose | Auth |
 |-----|---------|------|
 | `geodienste.ch/db/av_0/{lang}` WFS | Building footprints by EGID or BBOX (`ms:LCSF`) | None (CORS) |
-| `api3.geo.admin.ch/MapServer/find` | GWR building attributes by EGID | None (CORS) |
+| `api3.geo.admin.ch/MapServer/find` | GWR building attributes + coordinates by EGID | None (CORS) |
+| `api3.geo.admin.ch/MapServer/identify` | vec25 building footprints — fallback for blocked cantons | None (CORS) |
 | `data.geo.admin.ch` | swissALTI3D + swissSURFACE3D COG tiles | None (CORS) |
 
 ---
@@ -90,8 +91,8 @@ Or deploy to any static hosting (GitHub Pages, Cloudflare Pages, etc.). GitHub P
 ```mermaid
 flowchart TD
     subgraph INPUT["Inputs"]
-        A1A["🔴 --footprints<br>AV GeoPackage / Shapefile / GeoJSON<br><i>required</i>"]
-        A1B["⚪ --csv<br>CSV: id, egid (default)<br>or id, lon, lat (with --use-coordinates)<br><i>optional</i>"]
+        A1A["⚪ --footprints<br>AV GeoPackage / Shapefile / GeoJSON<br><i>required unless --use-api</i>"]
+        A1B["⚪ --csv<br>CSV: id, egid (default)<br>or id, lon, lat (with --use-coordinates)<br><i>optional (required with --use-api)</i>"]
         A2["🔴 --alti3d<br>swissALTI3D tiles — terrain DTM 0.5m<br><i>required</i>"]
         A3["🔴 --surface3d<br>swissSURFACE3D tiles — surface DSM 0.5m<br><i>required</i>"]
     end
@@ -101,7 +102,7 @@ flowchart TD
     A2 --> S3
     A3 --> S3
 
-    S1["<b>Step 1 — Read Footprints</b><br>Mode A: all AV buildings<br>Mode B: EGID match against GWR_EGID (default)<br>Mode C: lon/lat spatial join (--use-coordinates)<br>Unmatched → status: no_footprint"]
+    S1["<b>Step 1 — Read Footprints</b><br>Mode A: all AV buildings<br>Mode B: EGID match against GWR_EGID (default)<br>Mode C: lon/lat spatial join (--use-coordinates)<br>Mode D: API cascade GWR→WFS→vec25 (--use-api)<br>Unmatched → status: no_footprint"]
     S2["<b>Step 2 — Aligned Grid</b><br>Minimum rotated rectangle orientation<br>Grid points filtered to footprint"]
     S3["<b>Step 3 — Volume & Heights</b><br>Sample DTM + DSM at each point<br>Volume = Σ max(surface_i − min(terrain), 0) × cell_area"]
     S4["<b>Step 4 — Floor Areas</b><br>GWR classification → floor height<br>Floors = height_minimal / floor_height<br>GFA = footprint × floors"]
@@ -125,13 +126,13 @@ flowchart TD
     classDef step fill:#eff6ff,stroke:#3b82f6,stroke-width:1.5px
     classDef optionalStep fill:#f3f4f6,stroke:#9ca3af,stroke-width:1px,stroke-dasharray:4 3
 
-    class A1A,A2,A3 required
-    class A1B optional
+    class A2,A3 required
+    class A1A,A1B optional
     class S1,S2,S3 step
     class S4 optionalStep
 ```
 
-> **Note:** The flowchart describes the Python CLI pipeline. The Web App follows the same 4 steps but sources data from public APIs instead of local files. The FME workbench implements Steps 1–3 only (no floor-area estimation).
+> **Note:** The flowchart describes the Python CLI pipeline. With `--use-api`, Step 1 fetches footprints from public APIs instead of a local file (GWR → geodienste.ch WFS → swisstopo vec25 cascade). The Web App follows the same 4 steps and the same API cascade. The FME workbench implements Steps 1–3 only (no floor-area estimation).
 
 ---
 
@@ -140,9 +141,19 @@ flowchart TD
 ```bash
 pip install -r python/requirements.txt
 
+# With a local AV GeoPackage (fastest, offline-capable)
 python python/main.py \
     --footprints "D:\AV_lv95\av_2056.gpkg" \
     --csv data/example.csv \
+    --alti3d "D:\SwissAlti3D" \
+    --surface3d "D:\swissSURFACE3D Raster" \
+    --estimate-area \
+    -o portfolio_volumes.csv
+
+# Or via API — no local AV file needed (requires internet)
+python python/main.py \
+    --csv data/example.csv \
+    --use-api \
     --alti3d "D:\SwissAlti3D" \
     --surface3d "D:\swissSURFACE3D Raster" \
     --estimate-area \
@@ -177,7 +188,7 @@ The pipeline uses AV polygons for the footprint geometry (needed by Steps 1–3 
 | Data timing | The elevation model may have been captured before or after the building was constructed or modified |
 | Sloped terrain | Volume is measured from `elevation_base_min` (lowest terrain point) as a flat datum. On steeply sloped sites, this includes terrain undulation. |
 | Polygon validity vs. display | A handful of AV polygons have edge-case geometry (self-touching rings, near-degenerate vertices) that some GIS renderers (e.g. ArcGIS) refuse to draw. **The planar area is still computed correctly** — Shapely/GEOS is more permissive about edge-case validity than display engines, and `polygon.area` returns the right value for these features. If you need to display the same polygons in a map, you may need to dissolve/clean them in your GIS tool first; that does not affect this pipeline's numbers. |
-| Web App coverage | 6 cantons (JU, LU, NE, NW, OW, VD) block the geodienste.ch WFS — use the Python CLI with a local GeoPackage for full coverage |
+| vec25 fallback accuracy | In cantons not on geodienste.ch (JU, LU, VD), both the Web App and `--use-api` mode use swisstopo vec25 footprints, which have a ~2-year update cycle and lower geometric accuracy than official AV data |
 
 ---
 
@@ -193,7 +204,7 @@ area-estimator/
 ├── python/                        ← Python CLI — see python/README.md
 │   ├── README.md                     CLI reference, output schema, tests, type hints
 │   ├── main.py                       CLI entry point + aggregate_by_input_id
-│   ├── footprints.py                 Step 1: load footprints
+│   ├── footprints.py                 Step 1: load footprints (AV file / API cascade)
 │   ├── volume.py                     Steps 2 + 3: grid + volume + heights, BuildingResult
 │   ├── area.py                       Step 4: GWR enrichment + floor area
 │   ├── tile_fetcher.py               On-demand tile download
@@ -294,6 +305,7 @@ Self-contained tools that aren't part of the main pipeline live in [experimental
 | Provider | Dataset | Usage |
 |----------|---------|-------|
 | [swisstopo](https://www.swisstopo.admin.ch/) | swissALTI3D, swissSURFACE3D | Terrain (DTM) and surface (DSM) elevation models at 0.5m resolution |
+| [swisstopo](https://www.swisstopo.admin.ch/) | vec25 Gebäude (via MapServer identify) | Building footprints fallback for cantons not on geodienste.ch |
 | [geodienste.ch](https://www.geodienste.ch/) | Amtliche Vermessung (AV) WFS | Building footprints from official cadastral survey |
 | [BFS](https://www.bfs.admin.ch/) | GWR (Gebäude- und Wohnungsregister) | Building classification, construction year, floor count |
 | [CARTO](https://carto.com/) | Positron, Dark Matter | Basemap tiles |

@@ -16,15 +16,20 @@ All functions return a GeoDataFrame in LV95 (EPSG:2056) with columns:
     (+ input_id, input_egid, etc. for CSV-driven modes)
 """
 
+import json
 import logging
 import math
 import re
+import urllib.error
+import urllib.parse
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Optional, Union
 
 import geopandas as gpd
 import pandas as pd
-from shapely.geometry import Point
+from shapely.geometry import Point, shape
 
 from volume import (
     STATUS_INVALID_EGID,
@@ -262,6 +267,48 @@ def _read_input_csv(csv_path: Union[str, Path]) -> pd.DataFrame:
     return df
 
 
+def _prepare_egid_csv(
+    csv_path: Union[str, Path],
+    limit: Optional[int] = None,
+) -> tuple[pd.DataFrame, list[int]]:
+    """
+    Read and validate a CSV with ``id``/``egid`` columns, parse EGID cells.
+
+    Returns ``(df, all_egids)`` where *df* has columns ``input_id``,
+    ``input_egid_raw``, ``parsed_egids`` (plus any extra CSV columns),
+    and *all_egids* is a sorted de-duplicated list of valid EGIDs.
+    """
+    df = _read_input_csv(csv_path)
+
+    missing = [c for c in ('id', 'egid') if c not in df.columns]
+    if missing:
+        raise ValueError(
+            f"CSV missing required columns: {missing}. Found: {list(df.columns)}"
+        )
+
+    if limit:
+        df = df.head(limit)
+
+    df = df.rename(columns={'id': 'input_id'})
+    df['input_egid_raw'] = df['egid']
+    df['parsed_egids'] = df['egid'].apply(_parse_egid_cell)
+    df = df.reset_index(drop=True)
+
+    all_egids = sorted({e for lst in df['parsed_egids'] for e in lst})
+    n_invalid = int((df['parsed_egids'].apply(len) == 0).sum())
+    n_multi = int((df['parsed_egids'].apply(len) > 1).sum())
+
+    log.info(
+        f"Loaded {len(df)} rows from {Path(csv_path).name} "
+        f"({len(all_egids)} unique valid EGIDs across {len(df) - n_invalid} rows, "
+        f"{n_invalid} invalid"
+        + (f", {n_multi} multi-EGID" if n_multi else "")
+        + ")"
+    )
+
+    return df, all_egids
+
+
 def load_footprints_from_av_with_egids(
     av_path: Union[str, Path],
     csv_path: Union[str, Path],
@@ -291,39 +338,7 @@ def load_footprints_from_av_with_egids(
         input_id, input_egid, av_egid, fid, area_official_m2,
         geometry, status_step1, warnings
     """
-    df = _read_input_csv(csv_path)
-
-    missing = [c for c in ('id', 'egid') if c not in df.columns]
-    if missing:
-        raise ValueError(
-            f"CSV missing required columns: {missing}. Found: {list(df.columns)}"
-        )
-
-    if limit:
-        df = df.head(limit)
-
-    df = df.rename(columns={'id': 'input_id'})
-    df['input_egid_raw'] = df['egid']
-    # Parse each cell into a list of valid positive ints. Length 1 for the
-    # normal case, length N for multi-EGID inputs (any of `,/;` or
-    # whitespace as separator, aggregated back to one row per input_id
-    # at the end of the pipeline), length 0 for invalid cells.
-    df['parsed_egids'] = df['egid'].apply(_parse_egid_cell)
-    df = df.reset_index(drop=True)
-
-    # Flat union of every valid EGID across the whole CSV — a single
-    # WHERE-IN query against the AV file fetches them all at once.
-    all_egids = sorted({e for lst in df['parsed_egids'] for e in lst})
-    n_invalid = int((df['parsed_egids'].apply(len) == 0).sum())
-    n_multi_egid = int((df['parsed_egids'].apply(len) > 1).sum())
-
-    log.info(
-        f"Loaded {len(df)} rows from {Path(csv_path).name} "
-        f"({len(all_egids)} unique valid EGIDs across {len(df) - n_invalid} rows, "
-        f"{n_invalid} invalid"
-        + (f", {n_multi_egid} multi-EGID" if n_multi_egid else "")
-        + ")"
-    )
+    df, all_egids = _prepare_egid_csv(csv_path, limit)
 
     # ── Single push-down read ─────────────────────────────────────────────
     av_by_egid: dict[int, list] = {}
@@ -607,6 +622,368 @@ def load_footprints_from_av_with_coordinates(
     log.info(
         f"  Matched: {matched}  no_footprint: {no_match}"
         + (f"  multi-polygon points: {multi_polygon_hits}" if multi_polygon_hits else "")
+    )
+    return gpd.GeoDataFrame(records, crs='EPSG:2056')
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# API-based footprint fetching  (GWR → geodienste WFS → vec25 fallback)
+# ═════════════════════════════════════════════════════════════════════════
+
+# API endpoints  (GWR_FIND_URL intentionally duplicates area.py's constant
+# to avoid a cross-module import for a single string)
+_GWR_FIND_URL = "https://api3.geo.admin.ch/rest/services/ech/MapServer/find"
+_WFS_AV_URL = "https://geodienste.ch/db/av_0/deu"
+_VEC25_IDENTIFY_URL = "https://api3.geo.admin.ch/rest/services/ech/MapServer/identify"
+
+# Cantons where geodienste.ch WFS data is not freely available — these
+# skip the WFS and go straight to vec25. Last verified 2026-04-10 at
+# https://geodienste.ch/services/av
+_WFS_BLOCKED_CANTONS = frozenset({'JU', 'LU', 'VD'})
+
+_API_TIMEOUT_S = 15          # HTTP timeout per request (seconds)
+_API_POINT_BUFFER_M = 50     # Buffer around GWR point for bbox queries (m)
+_API_MAX_WORKERS = 10         # Concurrent HTTP requests
+
+
+def _fetch_json(url: str, context: str = '') -> Optional[dict]:
+    """HTTP GET → parsed JSON dict, or ``None`` on any error."""
+    try:
+        with urllib.request.urlopen(url, timeout=_API_TIMEOUT_S) as resp:
+            return json.loads(resp.read().decode('utf-8'))
+    except (urllib.error.URLError, json.JSONDecodeError, OSError) as e:
+        if context:
+            log.debug("%s: %s", context, e)
+        return None
+
+
+def _parse_geojson_geometry(geom_data: dict) -> Optional[Any]:
+    """Parse a GeoJSON geometry dict into a Shapely Polygon.
+
+    MultiPolygons are reduced to their largest component.
+    Returns ``None`` on parse failure.
+    """
+    try:
+        geom = shape(geom_data)
+    except Exception:
+        return None
+    if geom.geom_type == 'MultiPolygon':
+        geom = max(geom.geoms, key=lambda g: g.area)
+    return geom if geom.geom_type == 'Polygon' else None
+
+
+def _query_gwr_location(egid: int) -> Optional[dict]:
+    """
+    Query GWR API for a building's LV95 coordinates and canton.
+
+    Returns ``{'gkode': float, 'gkodn': float, 'gdekt': str}`` or ``None``.
+    """
+    query = urllib.parse.urlencode({
+        'layer': 'ch.bfs.gebaeude_wohnungs_register',
+        'searchText': str(egid),
+        'searchField': 'egid',
+        'returnGeometry': 'false',
+        'contains': 'false',
+    })
+    data = _fetch_json(f"{_GWR_FIND_URL}?{query}",
+                       f"GWR location for EGID {egid}")
+    if not data:
+        return None
+
+    results = data.get('results') or []
+    if not results:
+        return None
+
+    attrs = results[0].get('attributes') or results[0].get('properties') or {}
+    gkode = attrs.get('gkode')
+    gkodn = attrs.get('gkodn')
+    if gkode is None or gkodn is None:
+        return None
+
+    return {
+        'gkode': float(gkode),
+        'gkodn': float(gkodn),
+        'gdekt': attrs.get('gdekt') or '',
+    }
+
+
+def _query_wfs_footprints(gkode: float, gkodn: float) -> list[dict]:
+    """
+    Query geodienste.ch WFS for AV building footprints near a point.
+
+    Returns a list of candidate dicts with keys:
+    ``geometry``, ``av_egid``, ``area_official_m2``, ``source``.
+    """
+    buf = _API_POINT_BUFFER_M
+    bbox = f"{gkode - buf},{gkodn - buf},{gkode + buf},{gkodn + buf},EPSG:2056"
+
+    params = urllib.parse.urlencode({
+        'SERVICE': 'WFS',
+        'VERSION': '2.0.0',
+        'REQUEST': 'GetFeature',
+        'TYPENAMES': 'ms:LCSF',
+        'OUTPUTFORMAT': 'geojson',
+        'SRSNAME': 'urn:ogc:def:crs:EPSG::2056',
+        'BBOX': bbox,
+    })
+    data = _fetch_json(f"{_WFS_AV_URL}?{params}",
+                       f"WFS at ({gkode:.0f}, {gkodn:.0f})")
+    if not data:
+        return []
+
+    result = []
+    for f in data.get('features') or []:
+        props = f.get('properties') or {}
+        art = (props.get('Art') or props.get('art') or '').lower()
+        if 'unterirdisch' in art:
+            continue
+        if 'gebaeude' not in art and 'gebäude' not in art:
+            continue
+
+        geom = _parse_geojson_geometry(f.get('geometry') or {})
+        if geom is None:
+            continue
+
+        result.append({
+            'geometry': geom,
+            'av_egid': props.get('GWR_EGID') or props.get('gwr_egid'),
+            'area_official_m2': props.get('Flaeche') or props.get('flaeche'),
+            'source': 'wfs',
+        })
+
+    return result
+
+
+def _query_vec25_footprints(gkode: float, gkodn: float) -> list[dict]:
+    """
+    Query swisstopo vec25 identify for building footprints near a point.
+
+    Lower accuracy (~2-year update cycle) but covers the whole country.
+    Returns a list of candidate dicts (same shape as ``_query_wfs_footprints``).
+    """
+    # imageDisplay=500,500,96 with mapExtent ±250 m → 1 m/px.
+    # tolerance=50 → 50 px = 50 m search radius.
+    extent_buf = 250
+    me = f"{gkode - extent_buf},{gkodn - extent_buf},{gkode + extent_buf},{gkodn + extent_buf}"
+
+    params = urllib.parse.urlencode({
+        'geometryType': 'esriGeometryPoint',
+        'geometry': f'{gkode},{gkodn}',
+        'layers': 'all:ch.swisstopo.vec25-gebaeude',
+        'tolerance': '50',
+        'sr': '2056',
+        'returnGeometry': 'true',
+        'geometryFormat': 'geojson',
+        'imageDisplay': '500,500,96',
+        'mapExtent': me,
+    })
+    data = _fetch_json(f"{_VEC25_IDENTIFY_URL}?{params}",
+                       f"vec25 at ({gkode:.0f}, {gkodn:.0f})")
+    if not data:
+        return []
+
+    result = []
+    for r in data.get('results') or []:
+        geom = _parse_geojson_geometry(r.get('geometry') or {})
+        if geom is None:
+            continue
+
+        props = r.get('properties') or {}
+        result.append({
+            'geometry': geom,
+            'av_egid': None,       # vec25 carries no EGID
+            'area_official_m2': props.get('area'),
+            'source': 'vec25',
+        })
+
+    return result
+
+
+def _fetch_footprint_for_egid(egid: int) -> dict:
+    """
+    Fetch a single building footprint via the GWR → WFS → vec25 cascade.
+
+    Returns a dict with ``status``, and on success: ``geometry``,
+    ``av_egid``, ``area_official_m2``, ``source``, ``warning``.
+    """
+    # Step 1: GWR lookup → coordinates + canton
+    gwr = _query_gwr_location(egid)
+    if gwr is None:
+        return {'status': STATUS_NO_FOOTPRINT,
+                'warning': f'EGID {egid} not found in GWR'}
+
+    gkode, gkodn, gdekt = gwr['gkode'], gwr['gkodn'], gwr['gdekt']
+    pt = Point(gkode, gkodn)
+
+    # Step 2/3: Try WFS (skip for blocked cantons), then vec25 fallback
+    candidates = []
+    sources: list[str] = []
+
+    if gdekt not in _WFS_BLOCKED_CANTONS:
+        candidates = _query_wfs_footprints(gkode, gkodn)
+        sources.append('wfs')
+
+    if not candidates:
+        candidates = _query_vec25_footprints(gkode, gkodn)
+        sources.append('vec25')
+
+    if not candidates:
+        return {'status': STATUS_NO_FOOTPRINT,
+                'warning': f'No footprint found via {"+".join(sources)} '
+                           f'(canton={gdekt})'}
+
+    # Step 4: Point-in-polygon match against the GWR coordinate
+    match = None
+    for c in candidates:
+        if c['geometry'].contains(pt):
+            match = c
+            break
+
+    # No exact PIP hit → take the candidate nearest to the GWR point
+    if match is None:
+        match = min(candidates, key=lambda c: c['geometry'].centroid.distance(pt))
+
+    area = match.get('area_official_m2')
+    if area is None:
+        area = round(match['geometry'].area, 2)
+
+    return {
+        'status': STATUS_OK,
+        'geometry': match['geometry'],
+        'av_egid': match.get('av_egid'),    # None for vec25 — intentional
+        'area_official_m2': area,
+        'source': match['source'],
+        'warning': None,
+    }
+
+
+def load_footprints_from_api_with_egids(
+    csv_path: Union[str, Path],
+    limit: Optional[int] = None,
+) -> gpd.GeoDataFrame:
+    """
+    Load building footprints via API cascade: GWR → WFS → vec25.
+
+    No local AV GeoPackage file required. For each EGID in the CSV:
+
+    1. **GWR API** → building LV95 coordinates + canton abbreviation
+    2. **geodienste.ch WFS** → official AV footprint polygon (free cantons)
+    3. **swisstopo vec25 identify** → lower-accuracy fallback (for blocked
+       cantons JU/LU/VD, or when WFS returns empty)
+
+    Point-in-polygon matching against the GWR coordinate selects the
+    correct feature when multiple buildings are within the search buffer.
+
+    Required CSV columns: ``id``, ``egid``
+
+    Returns GeoDataFrame in LV95 with columns:
+        input_id, input_egid, av_egid, fid, area_official_m2,
+        geometry, status_step1, warnings
+    """
+    df, all_egids = _prepare_egid_csv(csv_path, limit)
+
+    # ── Parallel API cascade for all unique EGIDs ────────────────────────
+    footprint_by_egid: dict[int, dict] = {}
+
+    if all_egids:
+        log.info(f"Fetching footprints via API for {len(all_egids)} EGIDs "
+                 f"({_API_MAX_WORKERS} workers)...")
+
+        with ThreadPoolExecutor(max_workers=_API_MAX_WORKERS) as pool:
+            futures = {
+                pool.submit(_fetch_footprint_for_egid, e): e
+                for e in all_egids
+            }
+            done = 0
+            for future in as_completed(futures):
+                egid = futures[future]
+                try:
+                    footprint_by_egid[egid] = future.result()
+                except Exception as e:
+                    log.debug("API fetch failed for EGID %s: %s", egid, e)
+                    footprint_by_egid[egid] = {
+                        'status': STATUS_NO_FOOTPRINT,
+                        'warning': f'API error: {e}',
+                    }
+                done += 1
+                if done % 50 == 0 or done == len(all_egids):
+                    log.info(f"  API progress: {done}/{len(all_egids)}")
+
+        n_wfs = sum(1 for r in footprint_by_egid.values()
+                    if r.get('source') == 'wfs')
+        n_vec25 = sum(1 for r in footprint_by_egid.values()
+                      if r.get('source') == 'vec25')
+        n_fail = sum(1 for r in footprint_by_egid.values()
+                     if r['status'] != STATUS_OK)
+        log.info(f"  Results: {n_wfs} from WFS, {n_vec25} from vec25, "
+                 f"{n_fail} not found")
+
+    # ── Build output rows in CSV order ───────────────────────────────────
+    records = []
+    matched = 0
+    no_match = 0
+    invalid = 0
+    fid_counter = 0
+
+    for row in df.itertuples(index=False):
+        input_id = row.input_id
+        egids = row.parsed_egids
+
+        if not egids:
+            records.append(_egid_record(
+                input_id=input_id, input_egid=row.input_egid_raw,
+                av_egid=None, fid=None, geometry=None, area_official_m2=None,
+                status=STATUS_INVALID_EGID,
+                warnings=[f'EGID could not be parsed as a positive integer: '
+                          f'{row.input_egid_raw!r}'],
+            ))
+            invalid += 1
+            continue
+
+        base_warnings = []
+        if len(egids) > 1:
+            base_warnings.append(
+                f'Input cell contained {len(egids)} EGIDs: '
+                f'{", ".join(str(e) for e in egids)}'
+            )
+
+        for egid_int in egids:
+            fp = footprint_by_egid.get(egid_int, {})
+
+            if fp.get('status') != STATUS_OK:
+                warnings = list(base_warnings)
+                if fp.get('warning'):
+                    warnings.append(fp['warning'])
+                records.append(_egid_record(
+                    input_id=input_id, input_egid=egid_int,
+                    av_egid=None, fid=None, geometry=None,
+                    area_official_m2=None,
+                    status=STATUS_NO_FOOTPRINT, warnings=warnings,
+                ))
+                no_match += 1
+                continue
+
+            warnings = list(base_warnings)
+            if fp.get('source') == 'vec25':
+                warnings.append(
+                    'footprint from vec25 (lower accuracy, ~2-year update cycle)'
+                )
+
+            fid_counter += 1
+            records.append(_egid_record(
+                input_id=input_id,
+                input_egid=egid_int,
+                av_egid=fp.get('av_egid'),     # None for vec25; input EGID
+                fid=f'api_{fid_counter}',      # is already in input_egid
+                geometry=fp.get('geometry'),
+                area_official_m2=fp.get('area_official_m2'),
+                status=STATUS_OK, warnings=warnings,
+            ))
+            matched += 1
+
+    log.info(
+        f"  Matched: {matched}  no_footprint: {no_match}  "
+        f"invalid_egid: {invalid}"
     )
     return gpd.GeoDataFrame(records, crs='EPSG:2056')
 
