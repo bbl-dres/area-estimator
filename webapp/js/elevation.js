@@ -376,6 +376,10 @@ export function computeVolumeSync(coordsLV95) {
   };
 }
 
+export function getTileCacheSize() {
+  return tileDataCache.size;
+}
+
 export function clearElevationCache() {
   tileDataCache.clear();
   failedTiles.clear();

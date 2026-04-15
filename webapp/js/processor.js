@@ -7,7 +7,7 @@
  */
 
 import { API, CONCURRENCY, STATUS, WFS_BLOCKED_CANTONS, getFloorHeight, determineAccuracy } from "./config.js";
-import { toLV95, fromLV95, preloadTiles, computeVolumeSync, polygonAreaLV95 } from "./elevation.js";
+import { toLV95, fromLV95, preloadTiles, computeVolumeSync, polygonAreaLV95, getTileCacheSize } from "./elevation.js";
 
 /* global turf */
 
@@ -23,11 +23,15 @@ export function cancelProcessing() {
  * @param {function} onProgress - Callback({ processed, total, succeeded, failed })
  * @returns {object} { buildings: [...] } or null if cancelled
  */
-export async function processRows(rows, onProgress) {
+export async function processRows(rows, onProgress, onPhase) {
   cancelled = false;
   const total = rows.length;
   let processed = 0, succeeded = 0, failed = 0;
   let noFootprint = 0, noHeight = 0;
+  let activeNetwork = 0;
+  const phase = (label) => { if (onPhase) onPhase({ label, activeNetwork, tileCache: getTileCacheSize() }); };
+  const netStart = (label) => { activeNetwork++; phase(label); };
+  const netEnd = () => { activeNetwork = Math.max(0, activeNetwork - 1); phase(null); };
 
   async function processOne(row) {
     if (cancelled) return null;
@@ -71,7 +75,9 @@ export async function processRows(rows, onProgress) {
 
     try {
       // Get building footprint
+      netStart(`Grundriss wird geladen (ID ${row.id || row.egid || ""})…`);
       const footprint = await fetchFootprint(row);
+      netEnd();
       if (!footprint) {
         result.status = STATUS.NO_FOOTPRINT;
         failed++;
@@ -97,9 +103,18 @@ export async function processRows(rows, onProgress) {
       const lv95Coords = coords.map((c) => toLV95(c[0], c[1]));
 
       // Pre-load tiles for this building's extent
-      await preloadTiles(lv95Coords);
+      netStart("Höhendaten werden geladen…");
+      await preloadTiles(lv95Coords, (loaded, totalTiles) => {
+        if (onPhase) onPhase({
+          label: `Höhendaten: Kachel ${loaded}/${totalTiles} wird geladen…`,
+          activeNetwork,
+          tileCache: getTileCacheSize(),
+        });
+      });
+      netEnd();
 
       // Compute volume
+      phase("Volumen wird berechnet…");
       const vol = computeVolumeSync(lv95Coords);
       if (!vol) {
         result.status = STATUS.NO_HEIGHT_DATA;
@@ -120,7 +135,9 @@ export async function processRows(rows, onProgress) {
       const egid = footprint.egid || row.egid;
       if (egid) {
         try {
+          netStart("GWR-Attribute werden abgefragt…");
           const gwr = await fetchGWRAttributes(egid);
+          netEnd();
           if (gwr) {
             result.gkat = gwr.gkat || null;
             result.gklas = gwr.gklas || null;
@@ -129,6 +146,7 @@ export async function processRows(rows, onProgress) {
           }
         } catch (e) {
           // GWR lookup failure is non-fatal
+          netEnd();
         }
 
         // Estimate floor area

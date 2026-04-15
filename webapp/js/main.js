@@ -88,11 +88,16 @@ async function onStartProcessing(parsedData) {
   showState("processing");
   currentFilename = parsedData.filename || "";
   const startTime = Date.now();
+  completionTimes.length = 0;
+  lastProcessed = 0;
+  lastTileCache = 0;
 
   try {
-    processedResults = await processRows(parsedData.rows, (progress) => {
-      updateProgress(progress, startTime);
-    });
+    processedResults = await processRows(
+      parsedData.rows,
+      (progress) => updateProgress(progress, startTime),
+      (phase) => updatePhase(phase),
+    );
 
     if (!processedResults || !processedResults.buildings.length) {
       showState("upload");
@@ -103,6 +108,8 @@ async function onStartProcessing(parsedData) {
 
     progressEls.barFill.style.width = "100%";
     progressEls.bar.setAttribute("aria-valuenow", "100");
+    progressEls.bar.classList.remove("is-busy");
+    if (progressEls.phase) progressEls.phase.textContent = "";
 
     showResults();
   } catch (err) {
@@ -115,11 +122,17 @@ async function onStartProcessing(parsedData) {
 
 // Cached DOM refs
 const progressEls = {};
+// Rolling window of completion timestamps for ETA smoothing
+const ETA_WINDOW = 10;
+const completionTimes = [];
+let lastProcessed = 0;
+let lastTileCache = 0;
 
 function cacheProgressEls() {
   progressEls.barFill = document.getElementById("progress-bar-fill");
   progressEls.bar = document.querySelector(".progress-bar");
   progressEls.text = document.getElementById("progress-text");
+  progressEls.phase = document.getElementById("progress-phase");
   progressEls.eta = document.getElementById("progress-eta");
   progressEls.stats = document.getElementById("progress-stats");
 }
@@ -127,15 +140,25 @@ function cacheProgressEls() {
 function updateProgress(progress, startTime) {
   if (!progressEls.barFill) cacheProgressEls();
 
-  const { processed, total, succeeded, failed, noFootprint, noHeight, currentId } = progress;
+  const { processed, total, succeeded, failed, noFootprint, noHeight } = progress;
   const pct = total > 0 ? ((processed / total) * 100).toFixed(1) : 0;
 
   progressEls.barFill.style.width = `${pct}%`;
   progressEls.bar.setAttribute("aria-valuenow", Math.round(pct));
   progressEls.text.textContent = `Gebäude ${processed} / ${total} (${pct}%)`;
 
-  const elapsed = Date.now() - startTime;
-  const perItem = processed > 0 ? elapsed / processed : 0;
+  // Record completion timestamps for the rolling ETA window
+  const now = Date.now();
+  while (lastProcessed < processed) { completionTimes.push(now); lastProcessed++; }
+  if (completionTimes.length > ETA_WINDOW) completionTimes.splice(0, completionTimes.length - ETA_WINDOW);
+
+  let perItem;
+  if (completionTimes.length >= 2) {
+    const span = completionTimes[completionTimes.length - 1] - completionTimes[0];
+    perItem = span / (completionTimes.length - 1);
+  } else {
+    perItem = processed > 0 ? (now - startTime) / processed : 0;
+  }
   const remaining = perItem * (total - processed);
   const etaSeconds = Math.ceil(remaining / 1000);
   const etaMin = Math.floor(etaSeconds / 60);
@@ -149,7 +172,17 @@ function updateProgress(progress, startTime) {
   if (noFootprint) parts.push(`Kein Grundriss: ${noFootprint}`);
   if (noHeight) parts.push(`Keine Höhe: ${noHeight}`);
   if (failed - (noFootprint || 0) - (noHeight || 0) > 0) parts.push(`Fehler: ${failed - noFootprint - noHeight}`);
+  if (lastTileCache > 0) parts.push(`Kacheln im Cache: ${lastTileCache}`);
   progressEls.stats.textContent = parts.join(" | ");
+}
+
+function updatePhase(phase) {
+  if (!progressEls.barFill) cacheProgressEls();
+  const { label, activeNetwork, tileCache } = phase;
+  if (typeof tileCache === "number") lastTileCache = tileCache;
+  if (label) progressEls.phase.textContent = label;
+  else if (activeNetwork === 0) progressEls.phase.textContent = "";
+  progressEls.bar.classList.toggle("is-busy", activeNetwork > 0);
 }
 
 function showResults() {

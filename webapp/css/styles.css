@@ -178,9 +178,12 @@ main { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: 
 /* -- Processing -- */
 .processing-card { width: 100%; max-width: 500px; text-align: center; background: var(--color-white); padding: var(--space-8) var(--space-6); border-radius: var(--radius-lg); border: var(--space-px) solid var(--gray-200); box-shadow: var(--shadow-sm); }
 .processing-card h2 { font-size: var(--text-xl); margin-bottom: var(--space-6); }
-.progress-bar { width: 100%; height: var(--space-2); background: var(--gray-200); border-radius: var(--radius-full); overflow: hidden; margin-bottom: var(--space-3); }
-.progress-bar-fill { height: 100%; background: var(--federal-blue); border-radius: var(--radius-full); transition: width var(--duration-normal) ease; }
+.progress-bar { position: relative; width: 100%; height: var(--space-2); background: var(--gray-200); border-radius: var(--radius-full); overflow: hidden; margin-bottom: var(--space-3); }
+.progress-bar-fill { height: 100%; background: var(--federal-blue); border-radius: var(--radius-full); transition: width var(--duration-normal) ease; position: relative; z-index: 1; }
+.progress-bar.is-busy::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.55) 50%, transparent 100%); background-size: 40% 100%; background-repeat: no-repeat; animation: progress-shimmer 1.2s linear infinite; pointer-events: none; z-index: 2; }
+@keyframes progress-shimmer { 0% { background-position: -40% 0; } 100% { background-position: 140% 0; } }
 #progress-text { font-size: var(--text-sm); color: var(--gray-700); margin-bottom: var(--space-1); }
+#progress-phase { font-size: var(--text-xs); color: var(--gray-600); margin-bottom: var(--space-2); min-height: 1.2em; }
 #progress-eta { font-size: var(--text-xs); color: var(--gray-500); margin-bottom: var(--space-2); }
 #progress-stats { font-size: var(--text-xs); color: var(--gray-500); margin-bottom: var(--space-6); }
 
