@@ -22,16 +22,21 @@ const CSV_COLUMNS = [
   "status",
 ];
 
+/**
+ * Render a cell for CSV. Neutralizes spreadsheet formula injection: a text cell
+ * starting with =, +, -, or @ is prefixed with an apostrophe — but only when it
+ * isn't a real number, so numeric columns (incl. negatives) export unchanged.
+ */
+function csvCell(v) {
+  if (v == null) return "";
+  let s = String(v);
+  if (/^[=+\-@\t\r]/.test(s) && isNaN(Number(s))) s = "'" + s;
+  return s.includes(";") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
 export function downloadCSV(buildings) {
   const header = CSV_COLUMNS.join(";");
-  const rows = buildings.map((b) =>
-    CSV_COLUMNS.map((col) => {
-      const v = b[col];
-      if (v == null) return "";
-      const s = String(v);
-      return s.includes(";") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
-    }).join(";")
-  );
+  const rows = buildings.map((b) => CSV_COLUMNS.map((col) => csvCell(b[col])).join(";"));
   const csv = [header, ...rows].join("\n");
   downloadBlob(csv, `gebaeudevolumen_${timestamp()}.csv`, "text/csv;charset=utf-8");
 }
@@ -56,7 +61,13 @@ export function downloadGeoJSON(buildings) {
     .filter((b) => b.geometry)
     .map((b) => {
       const props = { ...b };
+      // Drop geometry (moved to the Feature) and the heavy/internal grid fields
+      // that would otherwise bloat every feature with thousands of cells.
       delete props.geometry;
+      delete props.grid_cells;
+      delete props.grid_angle;
+      delete props.grid_spacing;
+      delete props._idx;
       return { type: "Feature", geometry: b.geometry, properties: props };
     });
   const geojson = { type: "FeatureCollection", features };

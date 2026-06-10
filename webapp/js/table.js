@@ -6,6 +6,7 @@ import { esc, fmtNum, STATUS } from "./config.js";
 let container = null;
 let callbacks = {};
 let allData = [];
+let lastSorted = [];
 let sortKey = "input_id";
 let sortAsc = true;
 let page = 0;
@@ -24,6 +25,12 @@ export function populateTable(buildings) {
 
 export function highlightRow(index) {
   if (!container) return;
+  // The selected building may live on another page (or be filtered out) —
+  // find its position in the current view and navigate there before highlighting.
+  const pos = lastSorted.findIndex((r) => r._idx === index);
+  if (pos === -1) return; // not in the current filter
+  const targetPage = Math.floor(pos / pageSize);
+  if (targetPage !== page) { page = targetPage; render(); }
   container.querySelectorAll("tr.row-active").forEach((r) => r.classList.remove("row-active"));
   const row = container.querySelector(`tr[data-index="${index}"]`);
   if (row) {
@@ -60,6 +67,7 @@ function render() {
     }
     return sortAsc ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va));
   });
+  lastSorted = sorted;
 
   const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
   if (page >= totalPages) page = totalPages - 1;
@@ -104,7 +112,7 @@ function render() {
             ${pageData.length === 0 ? `<tr><td colspan="${COLUMNS.length}" class="empty-cell"><span class="material-symbols-outlined">search_off</span>Keine Ergebnisse</td></tr>` :
               pageData.map((row) => {
                 const isError = row.status !== STATUS.SUCCESS;
-                return `<tr data-index="${allData.indexOf(row)}" class="${isError ? "row-error" : ""}">
+                return `<tr data-index="${row._idx}" class="${isError ? "row-error" : ""}">
                   ${COLUMNS.map((c) => {
                     if (c.key === "status") return `<td>${statusLabel(row.status)}</td>`;
                     return `<td class="${c.cls}">${fmtCell(row[c.key], c.cls)}</td>`;

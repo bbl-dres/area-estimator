@@ -57,6 +57,7 @@ const CLUSTER_RADII = [
 
 let map = null;
 let is3D = false; // 2D (top-down) is the default view
+let uiBound = false; // app-chrome listeners (on persistent DOM) are bound once
 let buildingsGeoJSON = null;
 let clusterGeoJSON = null;
 let gridCellsGeoJSON = null;
@@ -124,6 +125,10 @@ export async function initMap(containerId, cbs) {
   callbacks = cbs || {};
   is3D = false; // every new analysis starts in 2D
 
+  // Tear down any previous map first — otherwise each new analysis leaks a
+  // WebGL context (browsers cap them) and stacks canvases in the container.
+  if (map) { map.remove(); map = null; }
+
   map = new maplibregl.Map({
     container: containerId,
     style: MAP_STYLES.positron.url,
@@ -139,25 +144,28 @@ export async function initMap(containerId, cbs) {
 
   await new Promise((resolve) => map.on("load", resolve));
 
-  // Basemap switcher
-  initBasemapSwitcher();
-
-  // 2D / 3D view toggle
-  initViewModeToggle();
-
-  // Accordion menu
-  initAccordion();
-
-  // Camera controls (mobile pitch/rotate)
+  // Per-map wiring (the nav group + map events are recreated with each map)
   initCameraControls();
-
-  // Footer coordinates
   map.on("mousemove", (e) => {
     const el = document.getElementById("footer-coords");
     if (el) el.textContent = `${e.lngLat.lat.toFixed(5)}, ${e.lngLat.lng.toFixed(5)}`;
   });
 
-  // Style switcher visible
+  // App-chrome listeners live on persistent DOM (toggles, accordion, basemap
+  // panel). Bind them exactly once — their handlers read the module-level `map`,
+  // so they always operate on the current map even across re-analyses.
+  if (!uiBound) {
+    initBasemapSwitcher();
+    initViewModeToggle();
+    initAccordion();
+    bindLayerToggles();
+    uiBound = true;
+  }
+
+  // Every analysis starts from the default layer set + 2D view
+  resetLayerTogglesToDefault();
+  updateViewToggleUI();
+
   document.getElementById("style-switcher")?.classList.add("visible");
 }
 
@@ -171,7 +179,7 @@ function buildClusterPoints(buildings) {
         type: "Feature",
         geometry: centroid.geometry,
         properties: {
-          _index: i,
+          _index: b._idx,
           id: b.input_id,
           status: b.status,
         },
@@ -271,7 +279,7 @@ export function plotResults(data) {
       type: "Feature",
       geometry: b.geometry,
       properties: {
-        _index: i,
+        _index: b._idx,
         id: b.input_id,
         egid: b.av_egid || b.input_egid,
         volume: b.volume_m3,
@@ -488,54 +496,6 @@ export function plotResults(data) {
   map.on("mouseenter", "unclustered-point", () => { map.getCanvas().style.cursor = "pointer"; });
   map.on("mouseleave", "unclustered-point", () => { map.getCanvas().style.cursor = ""; });
 
-  // Layer toggles
-  document.getElementById("layer-toggle-footprints")?.addEventListener("change", (e) => {
-    if (map.getLayer("buildings-outline")) {
-      map.setLayoutProperty("buildings-outline", "visibility", e.target.checked ? "visible" : "none");
-    }
-  });
-  document.getElementById("layer-toggle-buildings")?.addEventListener("change", (e) => {
-    if (map.getLayer("buildings-3d")) {
-      map.setLayoutProperty("buildings-3d", "visibility", e.target.checked ? "visible" : "none");
-    }
-  });
-  document.getElementById("layer-toggle-grid")?.addEventListener("change", (e) => {
-    if (e.target.checked) {
-      ensureGridCellsConverted();
-    }
-    if (map.getLayer("grid-cells-3d")) {
-      map.setLayoutProperty("grid-cells-3d", "visibility", e.target.checked ? "visible" : "none");
-    }
-  });
-  document.getElementById("layer-toggle-storeys")?.addEventListener("change", (e) => {
-    if (e.target.checked) {
-      ensureStoreyPolygonsConverted();
-    }
-    if (map.getLayer("storey-polygons-3d")) {
-      map.setLayoutProperty("storey-polygons-3d", "visibility", e.target.checked ? "visible" : "none");
-    }
-  });
-  document.getElementById("layer-toggle-labels")?.addEventListener("change", (e) => {
-    if (map.getLayer("buildings-labels")) {
-      map.setLayoutProperty("buildings-labels", "visibility", e.target.checked ? "visible" : "none");
-    }
-  });
-  document.getElementById("layer-toggle-clusters")?.addEventListener("change", (e) => {
-    const vis = e.target.checked ? "visible" : "none";
-    for (const id of ["clusters", "cluster-count", "unclustered-point"]) {
-      if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", vis);
-    }
-  });
-
-  // AV cadastral overlay
-  document.getElementById("layer-toggle-av")?.addEventListener("change", (e) => {
-    if (e.target.checked) {
-      addAvOverlay();
-    } else {
-      if (map.getLayer("av-cadastral-layer")) map.removeLayer("av-cadastral-layer");
-    }
-  });
-
   // Apply the current 2D/3D view mode to the freshly added extrusion layers
   applyViewMode();
 
@@ -576,6 +536,57 @@ function addAvOverlay() {
     const beforeId = map.getLayer("buildings-outline") ? "buildings-outline" : undefined;
     map.addLayer({ id: "av-cadastral-layer", type: "raster", source: "av-cadastral", paint: { "raster-opacity": 0.5 } }, beforeId);
   }
+}
+
+// =============================================
+// Layer toggles (bound once, on persistent DOM)
+// =============================================
+const LAYER_TOGGLE_DEFAULTS = {
+  "layer-toggle-footprints": true,
+  "layer-toggle-buildings": true,
+  "layer-toggle-grid": false,
+  "layer-toggle-storeys": false,
+  "layer-toggle-labels": true,
+  "layer-toggle-clusters": true,
+  "layer-toggle-av": false,
+};
+
+/** Restore the layer checkboxes to their defaults at the start of each analysis. */
+function resetLayerTogglesToDefault() {
+  for (const [id, val] of Object.entries(LAYER_TOGGLE_DEFAULTS)) {
+    const el = document.getElementById(id);
+    if (el) el.checked = val;
+  }
+}
+
+/** Wire the layer-visibility checkboxes. Bound once; handlers act on the current map. */
+function bindLayerToggles() {
+  const onToggle = (id, layerIds, beforeShow) => {
+    document.getElementById(id)?.addEventListener("change", (e) => {
+      if (e.target.checked && beforeShow) beforeShow();
+      const vis = e.target.checked ? "visible" : "none";
+      for (const lid of layerIds) {
+        if (map.getLayer(lid)) map.setLayoutProperty(lid, "visibility", vis);
+      }
+    });
+  };
+
+  onToggle("layer-toggle-footprints", ["buildings-outline"]);
+  onToggle("layer-toggle-buildings", ["buildings-3d"]);
+  onToggle("layer-toggle-grid", ["grid-cells-3d"], ensureGridCellsConverted);
+  onToggle("layer-toggle-storeys", ["storey-polygons-3d"], ensureStoreyPolygonsConverted);
+  onToggle("layer-toggle-labels", ["buildings-labels"]);
+  onToggle("layer-toggle-clusters", ["clusters", "cluster-count", "unclustered-point"]);
+
+  // AV cadastral overlay adds/removes a layer rather than toggling visibility
+  document.getElementById("layer-toggle-av")?.addEventListener("change", (e) => {
+    if (!map) return;
+    if (e.target.checked) {
+      addAvOverlay();
+    } else if (map.getLayer("av-cadastral-layer")) {
+      map.removeLayer("av-cadastral-layer");
+    }
+  });
 }
 
 // =============================================

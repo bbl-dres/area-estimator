@@ -37,7 +37,6 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("btn-new").hidden = true;
     document.getElementById("btn-download").hidden = true;
     document.getElementById("view-mode-toggle").hidden = true;
-    document.getElementById("search-wrapper").hidden = true;
     document.getElementById("file-input").value = "";
     const err = document.getElementById("upload-error");
     if (err) { err.hidden = true; err.textContent = ""; }
@@ -188,6 +187,12 @@ function updatePhase(phase) {
 
 function showResults() {
   showState("results");
+
+  // Assign a stable id to every building so the table and map agree on which
+  // row a selection refers to, regardless of sorting, filtering, or which
+  // buildings have geometry. This is the single source of truth for selection.
+  processedResults.buildings.forEach((b, i) => { b._idx = i; });
+
   updateSummaryPanel();
 
   const isMobile = window.innerWidth <= 767;

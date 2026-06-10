@@ -7,14 +7,16 @@
  */
 
 import { API, CONCURRENCY, STATUS, WFS_BLOCKED_CANTONS, getFloorHeight, determineAccuracy } from "./config.js";
-import { toLV95, fromLV95, preloadTiles, computeVolumeSync, polygonAreaLV95, getTileCacheSize } from "./elevation.js";
+import { toLV95, fromLV95, preloadTiles, computeVolumeSync, polygonAreaLV95, getTileCacheSize, clearElevationCache } from "./elevation.js";
 
 /* global turf */
 
 let cancelled = false;
+let abortController = null;
 
 export function cancelProcessing() {
   cancelled = true;
+  if (abortController) abortController.abort(); // abort in-flight fetches + tiles
 }
 
 /**
@@ -25,6 +27,8 @@ export function cancelProcessing() {
  */
 export async function processRows(rows, onProgress, onPhase) {
   cancelled = false;
+  abortController = new AbortController();
+  clearElevationCache(); // start each run from a clean, bounded tile cache
   const total = rows.length;
   let processed = 0, succeeded = 0, failed = 0;
   let noFootprint = 0, noHeight = 0;
@@ -110,7 +114,7 @@ export async function processRows(rows, onProgress, onPhase) {
           activeNetwork,
           tileCache: getTileCacheSize(),
         });
-      });
+      }, abortController.signal);
       netEnd();
 
       // Compute volume
@@ -156,8 +160,10 @@ export async function processRows(rows, onProgress, onPhase) {
 
         if (result.height_minimal > 0 && result.area_footprint_m2 > 0) {
           let floorsEstimate = Math.max(1, result.height_minimal / fh.floorHeight);
-          // Cap at GWR floor count if available, otherwise sanity-limit to 200
-          const maxFloors = result.gastw > 0 ? result.gastw : 200;
+          // Cap at GWR floor count if available (gastw may arrive as a string),
+          // otherwise sanity-limit to 200
+          const gastwNum = Number(result.gastw);
+          const maxFloors = gastwNum > 0 ? gastwNum : 200;
           floorsEstimate = Math.min(floorsEstimate, maxFloors);
           result.floors_estimated = Math.round(floorsEstimate);
           result.area_floor_total_m2 = Math.round(result.area_footprint_m2 * floorsEstimate * 100) / 100;
@@ -197,9 +203,10 @@ export async function processRows(rows, onProgress, onPhase) {
   const allPromises = [];
 
   for (let i = 0; i < total; i++) {
-    if (cancelled) return null;
+    if (cancelled) break;
 
     await acquireSlot();
+    if (cancelled) { releaseSlot(); break; }
 
     const idx = i;
     const promise = processOne(rows[idx]).then((r) => {
@@ -211,6 +218,8 @@ export async function processRows(rows, onProgress, onPhase) {
     allPromises.push(promise);
   }
 
+  // Let any in-flight buildings settle (their aborted fetches reject quickly)
+  // instead of orphaning them to keep mutating state in the background.
   await Promise.all(allPromises);
 
   if (cancelled) return null;
@@ -365,25 +374,29 @@ const gwrCache = new Map();
  * Single HTTP call per EGID, cached. Used by both the footprint cascade
  * (for canton + coords) and floor area estimation (for classification).
  */
-async function fetchGWRAttributes(egid) {
+function fetchGWRAttributes(egid) {
   if (!egid) return null;
   const key = String(egid).trim();
+  // Cache the in-flight promise (not just the resolved value) so concurrent rows
+  // with the same EGID share one HTTP call instead of stampeding the API.
   if (gwrCache.has(key)) return gwrCache.get(key);
+  const promise = _fetchGWRAttributes(key);
+  gwrCache.set(key, promise);
+  return promise;
+}
 
+async function _fetchGWRAttributes(key) {
   try {
     const url = `${API.GWR_FIND}?layer=ch.bfs.gebaeude_wohnungs_register` +
       `&searchText=${encodeURIComponent(key)}&searchField=egid&returnGeometry=false&contains=false`;
     const resp = await fetchWithTimeout(url, 10000);
-    if (!resp.ok) { gwrCache.set(key, null); return null; }
+    if (!resp.ok) return null; // resolved null is cached (treat as a miss)
     const data = await resp.json();
 
-    if (!data.results || data.results.length === 0) {
-      gwrCache.set(key, null);
-      return null;
-    }
+    if (!data.results || data.results.length === 0) return null;
 
     const attrs = data.results[0].attributes || data.results[0].properties || {};
-    const result = {
+    return {
       // Location
       gkode: attrs.gkode ?? null,
       gkodn: attrs.gkodn ?? null,
@@ -394,11 +407,9 @@ async function fetchGWRAttributes(egid) {
       gbauj: attrs.gbauj || null,
       gastw: attrs.gastw || null,
     };
-
-    gwrCache.set(key, result);
-    return result;
   } catch (err) {
-    // Don't cache network errors — allow retry on transient failures
+    // Transient failure (incl. abort) — evict so a later row can retry
+    gwrCache.delete(key);
     return null;
   }
 }
@@ -510,5 +521,16 @@ function largestPolygon(geom) {
 function fetchWithTimeout(url, timeout = 15000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
-  return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
+  // Also abort when the whole run is cancelled (Abbrechen). Remove the listener
+  // on settle so a long run doesn't pile thousands of them onto one signal.
+  const ext = abortController;
+  let onAbort = null;
+  if (ext) {
+    if (ext.signal.aborted) controller.abort();
+    else { onAbort = () => controller.abort(); ext.signal.addEventListener("abort", onAbort); }
+  }
+  return fetch(url, { signal: controller.signal }).finally(() => {
+    clearTimeout(timer);
+    if (onAbort) ext.signal.removeEventListener("abort", onAbort);
+  });
 }

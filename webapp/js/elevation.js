@@ -27,6 +27,28 @@ const tileDataCache = new Map();
 const yearHints = { dtm: {}, dsm: {} };
 const failedTiles = new Set();
 
+// LRU cap on full rasters held in memory. Each 1 km / 0.5 m tile is ~16 MB
+// (2000×2000 Float32), so this caps the cache near ~1 GB worst case. Kept well
+// above the concurrent working set (CONCURRENCY buildings × a few tiles each ×2
+// for DTM+DSM) so a tile in use isn't evicted before its building samples it.
+const TILE_CACHE_MAX = 64;
+
+/** Map-backed LRU read: returns the entry and marks it most-recently-used. */
+function cacheGet(key) {
+  const v = tileDataCache.get(key);
+  if (v !== undefined) { tileDataCache.delete(key); tileDataCache.set(key, v); }
+  return v;
+}
+
+/** Map-backed LRU write: inserts and evicts the oldest entries past the cap. */
+function cacheSet(key, val) {
+  tileDataCache.set(key, val);
+  while (tileDataCache.size > TILE_CACHE_MAX) {
+    const oldest = tileDataCache.keys().next().value;
+    tileDataCache.delete(oldest);
+  }
+}
+
 export function tileIdFromLV95(x, y) {
   return Math.floor(x / 1000) + "-" + Math.floor(y / 1000);
 }
@@ -35,20 +57,21 @@ export function tileIdFromLV95(x, y) {
  * Open a COG tile and read the entire raster into memory.
  * Subsequent calls for the same tile return from cache instantly.
  */
-export async function getTileData(urlTemplate, tileId) {
+export async function getTileData(urlTemplate, tileId, signal) {
   const datasetKey = urlTemplate.includes("swissalti3d") ? "dtm" : "dsm";
   const cacheKey = datasetKey + ":" + tileId;
 
-  if (tileDataCache.has(cacheKey)) return tileDataCache.get(cacheKey);
+  if (tileDataCache.has(cacheKey)) return cacheGet(cacheKey);
   if (failedTiles.has(cacheKey)) return null;
 
   const hint = yearHints[datasetKey][tileId];
   const yearsToTry = hint ? [hint, ...YEARS.filter((y) => y !== hint)] : YEARS;
 
   for (const year of yearsToTry) {
+    if (signal?.aborted) return null;
     const url = urlTemplate.replace(/{year}/g, year).replace(/{tile}/g, tileId);
     try {
-      const tiff = await GeoTIFF.fromUrl(url, { allowFullFile: false });
+      const tiff = await GeoTIFF.fromUrl(url, { allowFullFile: false }, signal);
       const image = await tiff.getImage();
       const rasters = await image.readRasters();
       const origin = image.getOrigin();
@@ -64,10 +87,11 @@ export async function getTileData(urlTemplate, tileId) {
         ry: resolution[1],
       };
 
-      tileDataCache.set(cacheKey, tileData);
+      cacheSet(cacheKey, tileData);
       yearHints[datasetKey][tileId] = year;
       return tileData;
     } catch (e) {
+      if (signal?.aborted) return null; // cancelled — stop trying other years
       continue;
     }
   }
@@ -91,10 +115,23 @@ export function sampleFromTileData(tileData, x, y) {
 /**
  * Pre-load all DTM and DSM tiles needed for a set of LV95 points.
  */
-export async function preloadTiles(pointsLV95, onProgress) {
-  const tileIds = new Set();
+export async function preloadTiles(pointsLV95, onProgress, signal) {
+  // Cover every 1 km tile intersecting the footprint's bounding box — not just
+  // the tiles its ring vertices land in. A footprint can diagonally span a tile
+  // that no vertex touches; sampling those grid points would otherwise silently
+  // drop (un-preloaded tile → null → skipped) and undercount the volume.
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const pt of pointsLV95) {
-    tileIds.add(tileIdFromLV95(pt[0], pt[1]));
+    if (pt[0] < minX) minX = pt[0];
+    if (pt[0] > maxX) maxX = pt[0];
+    if (pt[1] < minY) minY = pt[1];
+    if (pt[1] > maxY) maxY = pt[1];
+  }
+  const tileIds = new Set();
+  for (let tx = Math.floor(minX / 1000); tx <= Math.floor(maxX / 1000); tx++) {
+    for (let ty = Math.floor(minY / 1000); ty <= Math.floor(maxY / 1000); ty++) {
+      tileIds.add(tx + "-" + ty);
+    }
   }
 
   // Collect tile load tasks as deferred functions (not started yet)
@@ -103,16 +140,17 @@ export async function preloadTiles(pointsLV95, onProgress) {
     const dtmKey = "dtm:" + tileId;
     const dsmKey = "dsm:" + tileId;
     if (!tileDataCache.has(dtmKey) && !failedTiles.has(dtmKey)) {
-      tasks.push(() => getTileData(ALTI3D_URL, tileId));
+      tasks.push(() => getTileData(ALTI3D_URL, tileId, signal));
     }
     if (!tileDataCache.has(dsmKey) && !failedTiles.has(dsmKey)) {
-      tasks.push(() => getTileData(SURFACE3D_URL, tileId));
+      tasks.push(() => getTileData(SURFACE3D_URL, tileId, signal));
     }
   });
 
   // Execute in batches of 4 — each batch starts only after the previous finishes
   let loaded = 0;
   for (let j = 0; j < tasks.length; j += 4) {
+    if (signal?.aborted) return;
     await Promise.all(tasks.slice(j, j + 4).map((fn) => fn().then(() => {
       loaded++;
       if (onProgress) onProgress(loaded, tasks.length);
