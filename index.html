@@ -143,6 +143,12 @@
           <div id="map-panel" class="map-panel">
             <div id="results-map"></div>
 
+            <!-- Map loading overlay (shown until the map has rendered) -->
+            <div id="map-loading" class="map-loading" role="status" aria-live="polite" hidden>
+              <div class="map-spinner" aria-hidden="true"></div>
+              <span>Karte wird geladen…</span>
+            </div>
+
             <!-- Accordion tools menu -->
             <div id="accordion-wrapper">
               <aside id="accordion-panel" aria-label="Kartenwerkzeuge">

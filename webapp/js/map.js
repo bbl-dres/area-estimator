@@ -64,6 +64,7 @@ let gridCellsGeoJSON = null;
 let rawGridCells = null;
 let storeyPolygonsGeoJSON = null;
 let rawStoreyData = null;
+let storeySrcBuildings = null; // source for lazy storey-polygon construction
 let callbacks = {};
 let summaryToggleCb = null;
 
@@ -90,9 +91,73 @@ function ensureGridCellsConverted() {
   }
 }
 
-/** Convert raw LV95 storey polygons to WGS84 GeoJSON on first use */
+/**
+ * Build the per-storey merged polygons (LV95) from the source buildings.
+ * Expensive (turf.union per storey) — run once, lazily, on first storey toggle.
+ */
+function buildStoreyPolygons() {
+  if (rawStoreyData) return; // already built (array, even if empty)
+  rawStoreyData = [];
+  if (!storeySrcBuildings) return;
+  const half = GRID_SPACING / 2;
+
+  for (let bi = 0; bi < storeySrcBuildings.length; bi++) {
+    const b = storeySrcBuildings[bi];
+    if (!b.grid_cells || !b.floor_height_used || b.floor_height_used <= 0) continue;
+
+    const floorH = b.floor_height_used;
+    const angle = b.grid_angle || 0;
+    const cos = Math.cos(angle), sin = Math.sin(angle);
+    const maxH = Math.max(...b.grid_cells.map((c) => c.h));
+    const maxStoreys = Math.ceil(maxH / floorH);
+
+    for (let s = 1; s <= maxStoreys; s++) {
+      const threshold = (s - 1) * floorH;
+      const cellsAtLevel = b.grid_cells.filter((c) => c.h > threshold);
+
+      // Skip storey if fewer than 50% of cells reach it (partial roof artefact)
+      if (cellsAtLevel.length < b.grid_cells.length * 0.5 && s > Math.floor(maxH / floorH)) continue;
+      if (cellsAtLevel.length === 0) continue;
+
+      // Build cell polygons in LV95 for union
+      const cellFeatures = cellsAtLevel.map((c) => {
+        const corners = [[-half, -half], [half, -half], [half, half], [-half, half]].map(([dx, dy]) =>
+          [c.x + dx * cos - dy * sin, c.y + dx * sin + dy * cos]
+        );
+        corners.push(corners[0]);
+        return turf.polygon([corners]);
+      });
+
+      // Union all cell polygons into a single polygon for this storey
+      let merged;
+      if (cellFeatures.length === 1) {
+        merged = cellFeatures[0];
+      } else {
+        try {
+          merged = turf.union(turf.featureCollection(cellFeatures));
+        } catch (_) {
+          continue; // if union fails, skip this storey
+        }
+      }
+
+      if (merged) {
+        rawStoreyData.push({
+          buildingIndex: bi,
+          storey: s,
+          polygonLV95: merged.geometry,
+          base: (s - 1) * floorH,
+          top: Math.min(s * floorH, maxH),
+        });
+      }
+    }
+  }
+}
+
+/** Build (if needed) + convert storey polygons to WGS84 GeoJSON on first use */
 function ensureStoreyPolygonsConverted() {
-  if (storeyPolygonsGeoJSON || !rawStoreyData || rawStoreyData.length === 0) return;
+  if (storeyPolygonsGeoJSON) return;
+  buildStoreyPolygons();
+  if (!rawStoreyData || rawStoreyData.length === 0) return;
   const features = rawStoreyData.map((sp) => {
     // Convert polygon rings from LV95 to WGS84
     const geom = sp.polygonLV95;
@@ -124,6 +189,7 @@ export function setSummaryToggleVisible(visible) {
 export async function initMap(containerId, cbs) {
   callbacks = cbs || {};
   is3D = false; // every new analysis starts in 2D
+  setMapLoading(true); // overlay until the map has rendered the results
 
   // Tear down any previous map first — otherwise each new analysis leaks a
   // WebGL context (browsers cap them) and stacks canvases in the container.
@@ -355,64 +421,15 @@ export function plotResults(data) {
     });
   }
 
-  // Storey polygons — compute merged polygon per storey per building
-  rawStoreyData = [];
+  // Storey polygons are expensive to build (per-storey turf.union over every
+  // grid cell) and the layer is off by default — so defer the whole computation
+  // to the first time the user enables it. Eagerly building it here was blocking
+  // the main thread for seconds (tanking INP and leaving the map blank).
+  storeySrcBuildings = data.buildings;
+  rawStoreyData = null;
   storeyPolygonsGeoJSON = null;
-  const half = GRID_SPACING / 2;
 
-  for (let bi = 0; bi < data.buildings.length; bi++) {
-    const b = data.buildings[bi];
-    if (!b.grid_cells || !b.floor_height_used || b.floor_height_used <= 0) continue;
-
-    const floorH = b.floor_height_used;
-    const angle = b.grid_angle || 0;
-    const cos = Math.cos(angle), sin = Math.sin(angle);
-    const maxH = Math.max(...b.grid_cells.map((c) => c.h));
-    const maxStoreys = Math.ceil(maxH / floorH);
-
-    for (let s = 1; s <= maxStoreys; s++) {
-      const threshold = (s - 1) * floorH;
-      const cellsAtLevel = b.grid_cells.filter((c) => c.h > threshold);
-
-      // Skip storey if fewer than 50% of cells reach it (partial roof artefact)
-      if (cellsAtLevel.length < b.grid_cells.length * 0.5 && s > Math.floor(maxH / floorH)) continue;
-      if (cellsAtLevel.length === 0) continue;
-
-      // Build cell polygons in LV95 for union
-      const cellFeatures = cellsAtLevel.map((c) => {
-        const corners = [[-half, -half], [half, -half], [half, half], [-half, half]].map(([dx, dy]) =>
-          [c.x + dx * cos - dy * sin, c.y + dx * sin + dy * cos]
-        );
-        corners.push(corners[0]);
-        return turf.polygon([corners]);
-      });
-
-      // Union all cell polygons into a single polygon for this storey
-      let merged;
-      if (cellFeatures.length === 1) {
-        merged = cellFeatures[0];
-      } else {
-        try {
-          merged = turf.union(turf.featureCollection(cellFeatures));
-        } catch (_) {
-          // If union fails, skip this storey
-          continue;
-        }
-      }
-
-      if (merged) {
-        rawStoreyData.push({
-          buildingIndex: bi,
-          storey: s,
-          polygonLV95: merged.geometry,
-          base: (s - 1) * floorH,
-          top: Math.min(s * floorH, maxH),
-        });
-      }
-    }
-  }
-
-  // Storey polygons source + layer (starts empty, converted lazily)
+  // Storey polygons source + layer (starts empty, built + converted lazily)
   const emptyGeoJSON2 = { type: "FeatureCollection", features: [] };
   if (map.getSource("storey-polygons")) {
     map.getSource("storey-polygons").setData(emptyGeoJSON2);
@@ -508,6 +525,11 @@ export function plotResults(data) {
     }
     map.fitBounds(bounds, { padding: 60, maxZoom: 17 });
   }
+
+  // Hide the loading overlay once the map has finished rendering the result.
+  // Safety timeout in case 'idle' is delayed by slow basemap tiles.
+  map.once("idle", () => setMapLoading(false));
+  setTimeout(() => setMapLoading(false), 8000);
 }
 
 export function highlightBuilding(index) {
@@ -521,6 +543,12 @@ export function highlightBuilding(index) {
 
 export function resizeMap() {
   if (map) map.resize();
+}
+
+/** Toggle the map loading overlay. */
+function setMapLoading(loading) {
+  const el = document.getElementById("map-loading");
+  if (el) el.hidden = !loading;
 }
 
 /** Add the AV cadastral raster overlay (idempotent). Inserted below the building outline. */
