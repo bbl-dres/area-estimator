@@ -37,7 +37,7 @@ The same estimation is available three ways. Each has its own README with full d
 
 ### Web App
 
-Zero-install browser app: upload a CSV of building EGIDs and explore volumes, heights, and floor-area estimates on an interactive 3D map, with export to CSV/Excel/GeoJSON.
+Zero-install browser app: upload a CSV of building EGIDs and explore volumes, heights, and floor-area estimates on an interactive 2D/3D map, with export to CSV/Excel/GeoJSON.
 
 - **Preview:** https://bbl-dres.github.io/area-estimator/
 - **Source code:** [`webapp/`](webapp/) (entry point [`index.html`](index.html) at the repo root)

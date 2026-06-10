@@ -56,6 +56,7 @@ const CLUSTER_RADII = [
 ];
 
 let map = null;
+let is3D = false; // 2D (top-down) is the default view
 let buildingsGeoJSON = null;
 let clusterGeoJSON = null;
 let gridCellsGeoJSON = null;
@@ -121,12 +122,14 @@ export function setSummaryToggleVisible(visible) {
 
 export async function initMap(containerId, cbs) {
   callbacks = cbs || {};
+  is3D = false; // every new analysis starts in 2D
 
   map = new maplibregl.Map({
     container: containerId,
     style: MAP_STYLES.positron.url,
     center: MAP_DEFAULT.center,
     zoom: MAP_DEFAULT.zoom,
+    pitch: 0,
     maxZoom: 19,
     attributionControl: true,
   });
@@ -138,6 +141,9 @@ export async function initMap(containerId, cbs) {
 
   // Basemap switcher
   initBasemapSwitcher();
+
+  // 2D / 3D view toggle
+  initViewModeToggle();
 
   // Accordion menu
   initAccordion();
@@ -524,20 +530,14 @@ export function plotResults(data) {
   // AV cadastral overlay
   document.getElementById("layer-toggle-av")?.addEventListener("change", (e) => {
     if (e.target.checked) {
-      if (!map.getSource("av-cadastral")) {
-        map.addSource("av-cadastral", {
-          type: "raster",
-          tiles: ["https://wms.geo.admin.ch/?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=ch.kantone.cadastralwebmap-farbe&FORMAT=image/png&TRANSPARENT=true&CRS=EPSG:3857&BBOX={bbox-epsg-3857}&WIDTH=256&HEIGHT=256"],
-          tileSize: 256,
-        });
-      }
-      if (!map.getLayer("av-cadastral-layer")) {
-        map.addLayer({ id: "av-cadastral-layer", type: "raster", source: "av-cadastral", paint: { "raster-opacity": 0.5 } }, "buildings-outline");
-      }
+      addAvOverlay();
     } else {
       if (map.getLayer("av-cadastral-layer")) map.removeLayer("av-cadastral-layer");
     }
   });
+
+  // Apply the current 2D/3D view mode to the freshly added extrusion layers
+  applyViewMode();
 
   // Fit bounds
   if (features.length > 0) {
@@ -563,6 +563,68 @@ export function resizeMap() {
   if (map) map.resize();
 }
 
+/** Add the AV cadastral raster overlay (idempotent). Inserted below the building outline. */
+function addAvOverlay() {
+  if (!map.getSource("av-cadastral")) {
+    map.addSource("av-cadastral", {
+      type: "raster",
+      tiles: ["https://wms.geo.admin.ch/?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=ch.kantone.cadastralwebmap-farbe&FORMAT=image/png&TRANSPARENT=true&CRS=EPSG:3857&BBOX={bbox-epsg-3857}&WIDTH=256&HEIGHT=256"],
+      tileSize: 256,
+    });
+  }
+  if (!map.getLayer("av-cadastral-layer")) {
+    const beforeId = map.getLayer("buildings-outline") ? "buildings-outline" : undefined;
+    map.addLayer({ id: "av-cadastral-layer", type: "raster", source: "av-cadastral", paint: { "raster-opacity": 0.5 } }, beforeId);
+  }
+}
+
+// =============================================
+// 2D / 3D view mode
+// =============================================
+/** Flatten extrusion heights to 0 in 2D, restore the real height expressions in 3D. */
+function applyViewMode() {
+  if (!map) return;
+  if (map.getLayer("buildings-3d")) {
+    map.setPaintProperty("buildings-3d", "fill-extrusion-height", is3D ? BUILDINGS_3D_PAINT["fill-extrusion-height"] : 0);
+  }
+  if (map.getLayer("grid-cells-3d")) {
+    map.setPaintProperty("grid-cells-3d", "fill-extrusion-height", is3D ? GRID_PAINT["fill-extrusion-height"] : 0);
+  }
+  if (map.getLayer("storey-polygons-3d")) {
+    map.setPaintProperty("storey-polygons-3d", "fill-extrusion-height", is3D ? STOREY_PAINT["fill-extrusion-height"] : 0);
+    map.setPaintProperty("storey-polygons-3d", "fill-extrusion-base", is3D ? STOREY_PAINT["fill-extrusion-base"] : 0);
+  }
+}
+
+/** Switch between 2D (flat, top-down) and 3D (tilted extrusions). 2D is the default. */
+export function setViewMode(threeD, animate = true) {
+  is3D = !!threeD;
+  applyViewMode();
+  const pitch = is3D ? 60 : 0;
+  if (map) {
+    if (animate) map.easeTo({ pitch, duration: 400 });
+    else map.setPitch(pitch);
+  }
+  updateViewToggleUI();
+}
+
+function updateViewToggleUI() {
+  document.querySelectorAll("#view-mode-toggle .view-toggle-btn").forEach((b) => {
+    const active = (b.dataset.mode === "3d") === is3D;
+    b.classList.toggle("active", active);
+    b.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+}
+
+function initViewModeToggle() {
+  const group = document.getElementById("view-mode-toggle");
+  if (!group) return;
+  group.querySelectorAll(".view-toggle-btn").forEach((btn) => {
+    btn.addEventListener("click", () => setViewMode(btn.dataset.mode === "3d"));
+  });
+  updateViewToggleUI();
+}
+
 // =============================================
 // Basemap switcher
 // =============================================
@@ -582,7 +644,11 @@ function initBasemapSwitcher() {
       // Remember current state
       const savedData = buildingsGeoJSON;
 
-      map.setStyle(cfg.url);
+      // diff:false forces a full style reload, so `style.load` always fires.
+      // With the default diff, switching between similar vector basemaps is applied
+      // as a diff that silently drops our custom sources/layers without firing the
+      // event — which is why the results used to vanish on basemap change.
+      map.setStyle(cfg.url, { diff: false });
       map.once("style.load", () => {
         // Re-add data after style change, respecting toggle states
         if (savedData) {
@@ -612,6 +678,12 @@ function initBasemapSwitcher() {
 
           // Re-add cluster layers
           addClusterLayers(visClusters);
+
+          // Re-add the AV cadastral overlay if it was toggled on
+          if (document.getElementById("layer-toggle-av")?.checked) addAvOverlay();
+
+          // Re-apply the current 2D/3D view mode (extrusion layers were recreated)
+          applyViewMode();
         }
       });
 

@@ -140,6 +140,22 @@ main { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: 
 .btn-secondary:hover:not(:disabled) { background: var(--gray-100); }
 .btn-sm { height: var(--control-sm); padding: 0 var(--space-2); font-size: var(--text-xs); }
 
+/* -- 2D / 3D view toggle (segmented control) -- */
+.view-toggle {
+  display: inline-flex; height: var(--control-md);
+  border: var(--space-px) solid var(--gray-300); border-radius: var(--radius-md);
+  overflow: hidden; background: var(--color-white); flex-shrink: 0;
+}
+.view-toggle-btn {
+  border: none; background: var(--color-white); color: var(--gray-600);
+  font-family: inherit; font-size: var(--text-xs); font-weight: var(--font-semibold);
+  padding: 0 var(--space-3); min-width: 38px; cursor: pointer;
+  transition: background var(--duration-fast), color var(--duration-fast);
+}
+.view-toggle-btn + .view-toggle-btn { border-left: var(--space-px) solid var(--gray-300); }
+.view-toggle-btn:hover:not(.active) { background: var(--gray-100); }
+.view-toggle-btn.active { background: var(--federal-blue); color: var(--color-white); }
+
 /* -- State containers -- */
 .app-state { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; animation: state-fade-in var(--duration-fast) ease; }
 @keyframes state-fade-in { from { opacity: 0; } to { opacity: 1; } }
@@ -964,6 +980,8 @@ main { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: 
   #header { padding: 0 var(--space-4); }
   .header-agency { font-size: var(--text-2xs); }
   .btn { height: var(--control-sm); font-size: var(--text-2xs); }
+  .view-toggle { height: var(--control-sm); }
+  .view-toggle-btn { font-size: var(--text-2xs); min-width: 34px; }
 
   /* Compact summary */
   .sp-donut { width: 110px; height: 110px; }

@@ -36,6 +36,7 @@ document.addEventListener("DOMContentLoaded", () => {
     showState("upload");
     document.getElementById("btn-new").hidden = true;
     document.getElementById("btn-download").hidden = true;
+    document.getElementById("view-mode-toggle").hidden = true;
     document.getElementById("search-wrapper").hidden = true;
     document.getElementById("file-input").value = "";
     const err = document.getElementById("upload-error");
@@ -211,6 +212,7 @@ function showResults() {
 
   document.getElementById("btn-download").hidden = false;
   document.getElementById("btn-new").hidden = false;
+  document.getElementById("view-mode-toggle").hidden = false;
 
   requestAnimationFrame(async () => {
     try {

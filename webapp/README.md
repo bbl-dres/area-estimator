@@ -19,7 +19,7 @@ Upload a CSV with `id` and `egid` columns; the app will:
 
 ## Features
 
-- **Interactive Map** — MapLibre GL JS with 3D building extrusions, orientation-aligned grid-cell visualization, 4 basemaps, scale bar
+- **Interactive Map** — MapLibre GL JS with a 2D/3D view toggle (starts in 2D), 3D building extrusions, orientation-aligned grid-cell visualization, 4 basemaps, scale bar
 - **Layer Panel** — Toggle Gebäudegrundflächen, Gebäudevolumen, Rasterzellen, Beschriftungen, and AV cadastral overlay
 - **Summary Panel** — Collapsible sections for building status, volume/height aggregates, and floor-area estimates
 - **Table Widget** — Sortable columns, search filter, pagination, resizable panel, row click → map highlight
