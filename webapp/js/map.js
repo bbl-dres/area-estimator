@@ -527,9 +527,10 @@ export function plotResults(data) {
   }
 
   // Hide the loading overlay once the map has finished rendering the result.
-  // Safety timeout in case 'idle' is delayed by slow basemap tiles.
-  map.once("idle", () => setMapLoading(false));
-  setTimeout(() => setMapLoading(false), 8000);
+  // Safety timeout in case 'idle' is delayed by slow basemap tiles; cleared on
+  // idle so it can't later hide an on-demand layer-loading overlay.
+  const safety = setTimeout(() => setMapLoading(false), 8000);
+  map.once("idle", () => { clearTimeout(safety); setMapLoading(false); });
 }
 
 export function highlightBuilding(index) {
@@ -545,10 +546,31 @@ export function resizeMap() {
   if (map) map.resize();
 }
 
-/** Toggle the map loading overlay. */
-function setMapLoading(loading) {
+/** Toggle the map loading overlay, optionally setting its message. */
+function setMapLoading(loading, message) {
   const el = document.getElementById("map-loading");
-  if (el) el.hidden = !loading;
+  if (!el) return;
+  if (loading && message) {
+    const txt = document.getElementById("map-loading-text");
+    if (txt) txt.textContent = message;
+  }
+  el.hidden = !loading;
+}
+
+/**
+ * Run a (possibly heavy, synchronous) task behind the map loading overlay.
+ * Yields two animation frames first so the spinner actually paints before the
+ * task blocks the main thread — otherwise the browser never shows it. Reusable
+ * for any on-the-fly map computation (storey polygons, grid cells, …).
+ */
+async function runWithMapLoading(task, message) {
+  setMapLoading(true, message);
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  try {
+    return await task();
+  } finally {
+    setMapLoading(false);
+  }
 }
 
 /** Add the AV cadastral raster overlay (idempotent). Inserted below the building outline. */
@@ -589,20 +611,38 @@ function resetLayerTogglesToDefault() {
 
 /** Wire the layer-visibility checkboxes. Bound once; handlers act on the current map. */
 function bindLayerToggles() {
-  const onToggle = (id, layerIds, beforeShow) => {
-    document.getElementById(id)?.addEventListener("change", (e) => {
-      if (e.target.checked && beforeShow) beforeShow();
-      const vis = e.target.checked ? "visible" : "none";
-      for (const lid of layerIds) {
-        if (map.getLayer(lid)) map.setLayoutProperty(lid, "visibility", vis);
+  const setVis = (layerIds, checked) => {
+    const vis = checked ? "visible" : "none";
+    for (const lid of layerIds) {
+      if (map.getLayer(lid)) map.setLayoutProperty(lid, "visibility", vis);
+    }
+  };
+
+  // Simple visibility toggle — layer is already on the map.
+  const onToggle = (id, layerIds) => {
+    document.getElementById(id)?.addEventListener("change", (e) => setVis(layerIds, e.target.checked));
+  };
+
+  // Toggle for a layer whose data is built on first use. `prep` does the heavy
+  // (synchronous) work; `pending` reports whether that work is still outstanding,
+  // so the loading overlay only appears when there's actually something to build.
+  const onLazyToggle = (id, layerIds, prep, pending, msg) => {
+    document.getElementById(id)?.addEventListener("change", async (e) => {
+      const checked = e.target.checked;
+      if (checked) {
+        if (pending()) await runWithMapLoading(prep, msg);
+        else prep();
       }
+      setVis(layerIds, checked);
     });
   };
 
   onToggle("layer-toggle-footprints", ["buildings-outline"]);
   onToggle("layer-toggle-buildings", ["buildings-3d"]);
-  onToggle("layer-toggle-grid", ["grid-cells-3d"], ensureGridCellsConverted);
-  onToggle("layer-toggle-storeys", ["storey-polygons-3d"], ensureStoreyPolygonsConverted);
+  onLazyToggle("layer-toggle-grid", ["grid-cells-3d"], ensureGridCellsConverted,
+    () => !gridCellsGeoJSON && !!(rawGridCells && rawGridCells.length), "Rasterzellen werden berechnet…");
+  onLazyToggle("layer-toggle-storeys", ["storey-polygons-3d"], ensureStoreyPolygonsConverted,
+    () => rawStoreyData === null, "Geschosspolygone werden berechnet…");
   onToggle("layer-toggle-labels", ["buildings-labels"]);
   onToggle("layer-toggle-clusters", ["clusters", "cluster-count", "unclustered-point"]);
 
