@@ -43,8 +43,8 @@ Zero-install browser app: upload a CSV of building EGIDs and explore volumes, he
 - **Source code:** [`webapp/`](webapp/) (entry point [`index.html`](index.html) at the repo root)
 
 <p align="center">
-  <img src="assets/Preview_2.jpg" width="45%" style="vertical-align: top;"/>
-  <img src="assets/Preview_3.jpg" width="45%" style="vertical-align: top;"/>
+  <img src="assets/Preview_5.jpg" width="45%" style="vertical-align: top;"/>
+  <img src="assets/Preview_33.jpg" width="45%" style="vertical-align: top;"/>
 </p>
 
 ---
