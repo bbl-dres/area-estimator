@@ -23,6 +23,14 @@ Estimate the above-ground **volume** and **gross floor area** of Swiss buildings
 
 All processing works in CRS LV95 (EPSG:2056).
 
+<p align="center">
+  <img src="assets/Preview_2.jpg" width="45%" style="vertical-align: top;"/>
+  <img src="assets/Preview_3.jpg" width="45%" style="vertical-align: top;"/>
+</p>
+<p align="center">
+  <img src="assets/Preview_4.jpg" width="70%" />
+</p>
+
 ## Solutions
 
 The same estimation is available three ways. Each has its own README with full details.
@@ -37,9 +45,6 @@ Zero-install browser app: upload a CSV of building EGIDs and explore volumes, he
 <p align="center">
   <img src="assets/Preview_2.jpg" width="45%" style="vertical-align: top;"/>
   <img src="assets/Preview_3.jpg" width="45%" style="vertical-align: top;"/>
-</p>
-<p align="center">
-  <img src="assets/Preview_4.jpg" width="70%" />
 </p>
 
 ---
