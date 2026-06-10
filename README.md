@@ -46,10 +46,6 @@ Zero-install browser app: upload a CSV of building EGIDs and explore volumes, he
   <img src="assets/Preview_2.jpg" width="45%" style="vertical-align: top;"/>
   <img src="assets/Preview_3.jpg" width="45%" style="vertical-align: top;"/>
 </p>
-<p align="center">
-  <img src="assets/Preview_4.jpg" width="70%" />
-</p>
-
 
 ---
 
