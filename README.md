@@ -1,25 +1,42 @@
 # Swiss Building Volume & Area Estimator
 
-![Area Estimator](assets/Social1.jpg)
+Estimate building volumes and gross floor areas from publicly available Swiss elevation models (swissALTI3D / swissSURFACE3D) and cadastral data (Amtliche Vermessung + GWR).
 
+<!-- The hero image is clickable and opens the live app -->
+[![Swiss Building Volume & Area Estimator — click to open the live app](assets/Social1.jpg)](https://bbl-dres.github.io/area-estimator/)
+
+[![Demo on GitHub Pages](https://img.shields.io/badge/demo-GitHub%20Pages-2ea44f?logo=github&logoColor=white)](https://bbl-dres.github.io/area-estimator/)
+![License](https://img.shields.io/badge/license-MIT-lightgrey)
 ![Python](https://img.shields.io/badge/python-3.10+-blue?logo=python&logoColor=white)
-![JavaScript](https://img.shields.io/badge/javascript-ES6+-yellow)
 ![MapLibre](https://img.shields.io/badge/maplibre-4.7-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
 ![swisstopo](https://img.shields.io/badge/data-swisstopo-red)
 ![CRS](https://img.shields.io/badge/CRS-LV95%20EPSG%3A2056-orange)
 
-Estimates building volumes and gross floor areas using publicly available Swiss elevation models and cadastral data.
+> [!TIP]
+> **Try it now — open the live web app:** https://bbl-dres.github.io/area-estimator/
+>
+> No installation needed; it runs entirely in your browser.
 
-The solution is available in three variants:
+## What is this?
 
-- **[Web App](https://bbl-dres.github.io/area-estimator/)** — Zero-install browser app. Entry point is [`index.html`](index.html) at the project root (so GitHub Pages picks it up natively); CSS and JS modules live in [`webapp/`](webapp/). Upload a CSV with building EGIDs, get volumes and floor areas on a map with export to CSV/Excel/GeoJSON.
-- **[Python CLI](python/)** — Open-source, requires Python 3.10+ and free dependencies. Processes locally with exact LV95 areas and local elevation tiles. **See [python/README.md](python/README.md) for full CLI reference, output schema, and developer details.**
-- **[FME](fme/)** — Workbench implementing Steps 1–3, requires a licensed copy of [FME Form](https://fme.safe.com/fme-form/). **See [fme/README.md](fme/README.md) for the transformer pipeline.**
+Estimate the above-ground **volume** and **gross floor area** of Swiss buildings from public elevation and cadastral data. Provide a list of buildings (by EGID), and for each one the tool loads its footprint, samples terrain (DTM) and surface (DSM) elevations on an orientation-aligned grid, computes volume and heights, looks up the building's GWR classification, and converts that into an estimated floor count and gross floor area.
+
+All processing works in CRS LV95 (EPSG:2056).
+
+## Solutions
+
+The same estimation is available three ways. Each has its own README with full details.
+
+### Web App
+
+Zero-install browser app: upload a CSV of building EGIDs and explore volumes, heights, and floor-area estimates on an interactive 3D map, with export to CSV/Excel/GeoJSON.
+
+- **Preview:** https://bbl-dres.github.io/area-estimator/
+- **Source code:** [`webapp/`](webapp/) (entry point [`index.html`](index.html) at the repo root)
 
 <p align="center">
-  <img src="assets/Preview_2.jpg" width="45%" />
-  <img src="assets/Preview_3.jpg" width="45%" />
+  <img src="assets/Preview_2.jpg" width="45%" style="vertical-align: top;"/>
+  <img src="assets/Preview_3.jpg" width="45%" style="vertical-align: top;"/>
 </p>
 <p align="center">
   <img src="assets/Preview_4.jpg" width="70%" />
@@ -27,295 +44,54 @@ The solution is available in three variants:
 
 ---
 
-## Web App
+### Python CLI
 
-The browser-based version runs entirely client-side — no backend, no installation. Upload a CSV with `id` and `egid` columns and the app will:
+Open-source command-line tool for local, offline processing with exact planar (LV95) areas, a 1×1 m grid, local elevation tiles, and optional GWR-based floor-area estimation.
 
-1. Fetch building footprints from [geodienste.ch](https://geodienste.ch) WFS (`ms:LCSF`, filtered by `GWR_EGID`), with automatic [swisstopo vec25](https://api3.geo.admin.ch) fallback for cantons not on geodienste.ch
-2. Load elevation data (DTM + DSM) from [swisstopo COG tiles](https://data.geo.admin.ch) on-the-fly
-3. Compute volume and heights using an orientation-aligned 2×2m grid
-4. Look up building classification from [GWR](https://www.housing-stat.ch) via swisstopo API
-5. Estimate floor areas from building type and volume
-6. Display results on an interactive map with table and summary panel
-
-### Features
-
-- **Interactive Map** — MapLibre GL JS with 3D building extrusions, orientation-aligned grid cell visualization, 4 basemaps, scale bar
-- **Layer Panel** — Toggle Gebäudegrundflächen, Gebäudevolumen, Rasterzellen, Beschriftungen, and AV cadastral overlay
-- **Summary Panel** — Collapsible sections for building status, volume/height aggregates, and floor area estimates
-- **Table Widget** — Sortable columns, search filter, pagination, resizable panel, row click → map highlight
-- **Export** — CSV, Excel (XLSX), and GeoJSON with timestamped filenames
-- **Privacy** — All data stays in the browser. Only EGID and coordinates are sent to public APIs
-
-### Limitations vs Python Version
-
-| | Web App | Python CLI |
-|---|---|---|
-| **Data coverage** | All 26 cantons — WFS for most cantons, automatic vec25 fallback for blocked cantons (JU, LU, VD) | All cantons via local GeoPackage or `--use-api` (same cascade) |
-| **Elevation data** | On-the-fly COG tile loading from swisstopo CDN | Local GeoTIFF tiles (faster, offline) |
-| **Grid resolution** | 2×2m (configurable) | 1×1m (configurable) |
-| **Area calculation** | Spherical (Turf.js), ~0.1–0.5% error for spatial matching | Exact planar (LV95/EPSG:2056) |
-| **Throughput** | ~5 buildings in parallel, limited by API rate | Bulk processing with local data |
-| **EGID lookup** | Direct WFS filter by `GWR_EGID` | Local GeoPackage spatial join or API cascade |
-| **Offline** | Requires internet | Fully offline with local data (or API mode with internet) |
-
-> **Data coverage note:** Most cantons are freely available via the geodienste.ch WFS. Three cantons (JU, LU, VD) don't publish data there, so both the Web App and `--use-api` mode automatically fall back to swisstopo vec25 building footprints (lower accuracy, ~2-year update cycle). Coverage can also be incomplete in TI and VS.
-
-### Quick Start
-
-Open `index.html` in a browser (requires a local server for ES modules):
-
-```bash
-cd area-estimator
-python -m http.server 8080
-# Open http://localhost:8080
-```
-
-Or deploy to any static hosting (GitHub Pages, Cloudflare Pages, etc.). GitHub Pages serves the root `index.html` directly with no special configuration — the asset references inside `index.html` point at `webapp/css/`, `webapp/js/`, and `data/example.csv`, all of which are siblings of `index.html` in the served tree.
-
-> Why this layout? GitHub Pages' "Deploy from a branch" mode only accepts the branch root or a `/docs` folder as the publishing source — arbitrary subfolders like `webapp/` aren't supported. Keeping a thin `index.html` at the root means GitHub Pages works out of the box, while the technical assets (CSS, JS) stay in `webapp/` to keep the repo root clean.
-
-### APIs Used
-
-| API | Purpose | Auth |
-|-----|---------|------|
-| `geodienste.ch/db/av_0/{lang}` WFS | Building footprints by EGID or BBOX (`ms:LCSF`) | None (CORS) |
-| `api3.geo.admin.ch/MapServer/find` | GWR building attributes + coordinates by EGID | None (CORS) |
-| `api3.geo.admin.ch/MapServer/identify` | vec25 building footprints — fallback for blocked cantons | None (CORS) |
-| `data.geo.admin.ch` | swissALTI3D + swissSURFACE3D COG tiles | None (CORS) |
+- **Preview:** command-line tool — run locally (no hosted demo)
+- **Source code:** [`python/`](python/)
 
 ---
 
-## Model Overview
+### FME
 
-```mermaid
-flowchart TD
-    subgraph INPUT["Inputs"]
-        A1A["⚪ --footprints<br>AV GeoPackage / Shapefile / GeoJSON<br><i>required unless --use-api</i>"]
-        A1B["⚪ --csv<br>CSV: id, egid (default)<br>or id, lon, lat (with --use-coordinates)<br><i>optional (required with --use-api)</i>"]
-        A2["🔴 --alti3d<br>swissALTI3D tiles — terrain DTM 0.5m<br><i>required</i>"]
-        A3["🔴 --surface3d<br>swissSURFACE3D tiles — surface DSM 0.5m<br><i>required</i>"]
-    end
+The FME Form workspace (`.fmw`) implementing the volume pipeline (Steps 1–3) that the other two solutions reproduce.
 
-    A1A --> S1
-    A1B -.->|"--csv"| S1
-    A2 --> S3
-    A3 --> S3
-
-    S1["<b>Step 1 — Read Footprints</b><br>Mode A: all AV buildings<br>Mode B: EGID match against GWR_EGID (default)<br>Mode C: lon/lat spatial join (--use-coordinates)<br>Mode D: API cascade GWR→WFS→vec25 (--use-api)<br>Unmatched → status: no_footprint"]
-    S2["<b>Step 2 — Aligned Grid</b><br>Minimum rotated rectangle orientation<br>Grid points filtered to footprint"]
-    S3["<b>Step 3 — Volume & Heights</b><br>Sample DTM + DSM at each point<br>Volume = Σ max(surface_i − min(terrain), 0) × cell_area"]
-    S4["<b>Step 4 — Floor Areas</b><br>GWR classification → floor height<br>Floors = height_minimal / floor_height<br>GFA = footprint × floors"]
-
-    S1 --> S2 --> S3
-    S3 --> OUT
-    S3 -.->|"--estimate-area"| S4
-    S4 -.-> OUT
-
-    OUT[/"<b>Output CSV</b><br>volume · heights · elevations<br>+ floor areas if --estimate-area"/]
-
-    subgraph GWR["⚪ GWR Data — optional, only with --estimate-area"]
-        G1["--gwr-csv<br>CSV bulk download<br><i>housing-stat.ch</i>"]
-        G2["(default)<br>swisstopo API<br><i>per EGID, live lookup</i>"]
-    end
-
-    GWR -.-> S4
-
-    classDef required fill:#fde8e8,stroke:#e02424,stroke-width:2px
-    classDef optional fill:#f3f4f6,stroke:#9ca3af,stroke-width:1px
-    classDef step fill:#eff6ff,stroke:#3b82f6,stroke-width:1.5px
-    classDef optionalStep fill:#f3f4f6,stroke:#9ca3af,stroke-width:1px,stroke-dasharray:4 3
-
-    class A2,A3 required
-    class A1A,A1B optional
-    class S1,S2,S3 step
-    class S4 optionalStep
-```
-
-> **Note:** The flowchart describes the Python CLI pipeline. With `--use-api`, Step 1 fetches footprints from public APIs instead of a local file (GWR → geodienste.ch WFS → swisstopo vec25 cascade). The Web App follows the same 4 steps and the same API cascade. The FME workbench implements Steps 1–3 only (no floor-area estimation).
-
----
-
-## Quick Start — Python CLI
-
-```bash
-pip install -r python/requirements.txt
-
-# With a local AV GeoPackage (fastest, offline-capable)
-python python/main.py \
-    --footprints "D:\AV_lv95\av_2056.gpkg" \
-    --csv data/example.csv \
-    --alti3d "D:\SwissAlti3D" \
-    --surface3d "D:\swissSURFACE3D Raster" \
-    --estimate-area \
-    -o portfolio_volumes.csv
-
-# Or via API — no local AV file needed (requires internet)
-python python/main.py \
-    --csv data/example.csv \
-    --use-api \
-    --alti3d "D:\SwissAlti3D" \
-    --surface3d "D:\swissSURFACE3D Raster" \
-    --estimate-area \
-    -o portfolio_volumes.csv
-```
-
-For the full command-line reference, output schema, accuracy bucketing, warning catalog, and Floor Height Lookup table, see **[python/README.md](python/README.md)**.
-
----
-
-## AV vs GWR
-
-The pipeline uses two distinct Swiss data registers, linked by the `GWR_EGID` attribute:
-
-- **AV (Amtliche Vermessung)** — the cadastral survey, providing building **geometry** (parcel and footprint polygons). Maintained by cantonal survey offices, available via [geodienste.ch](https://www.geodienste.ch/).
-- **GWR (Gebäude- und Wohnungsregister)** — the federal building register, providing building **master data**: addresses, classification, construction year, dwelling counts. Maintained by the Federal Statistical Office, available via the [BFS](https://www.bfs.admin.ch/) and [swisstopo APIs](https://api3.geo.admin.ch/).
-
-The pipeline uses AV polygons for the footprint geometry (needed by Steps 1–3 to compute volume) and GWR classification (needed by Step 4 to convert volume to floor area). EGID is the natural key. A few percent of AV building polygons have no EGID assigned, which is why coordinate-based matching is kept as an option (`--use-coordinates`).
-
----
-
-## Limitations
-
-| Limitation | Detail |
-|------------|--------|
-| No underground estimation | LIDAR only sees above ground — basements and underground floors are not included |
-| Trees over buildings | The surface model doesn't distinguish roofs from foliage — tall trees over small buildings inflate the measured height and volume |
-| Surface model merging | swissSURFACE3D combines ground, vegetation, and buildings into one surface; this can cause overestimation near vegetation |
-| Small buildings | Footprints smaller than the grid cell size produce no grid points and can't be measured |
-| Mixed-use buildings | A single floor height is applied per building; actual floor heights may vary (e.g. retail ground floor + residential upper floors) |
-| Industrial / special buildings | Floor height ranges are wide (4–7 m), so floor count estimates are less reliable |
-| Data timing | The elevation model may have been captured before or after the building was constructed or modified |
-| Sloped terrain | Volume is measured from `elevation_base_min` (lowest terrain point) as a flat datum. On steeply sloped sites, this includes terrain undulation. |
-| Polygon validity vs. display | A handful of AV polygons have edge-case geometry (self-touching rings, near-degenerate vertices) that some GIS renderers (e.g. ArcGIS) refuse to draw. **The planar area is still computed correctly** — Shapely/GEOS is more permissive about edge-case validity than display engines, and `polygon.area` returns the right value for these features. If you need to display the same polygons in a map, you may need to dissolve/clean them in your GIS tool first; that does not affect this pipeline's numbers. |
-| vec25 fallback accuracy | In cantons not on geodienste.ch (JU, LU, VD), both the Web App and `--use-api` mode use swisstopo vec25 footprints, which have a ~2-year update cycle and lower geometric accuracy than official AV data |
-
----
-
-## Project Structure
-
-```
-area-estimator/
-├── README.md                      ← You are here (overview, web app, limitations)
-├── index.html                     ← Web app entry point (served by GitHub Pages)
-├── webapp/                        ← Web app technical assets
-│   ├── css/                          Stylesheets (tokens.css, styles.css)
-│   └── js/                           Modules (main.js, processor.js, …)
-├── python/                        ← Python CLI — see python/README.md
-│   ├── README.md                     CLI reference, output schema, tests, type hints
-│   ├── main.py                       CLI entry point + aggregate_by_input_id
-│   ├── footprints.py                 Step 1: load footprints (AV file / API cascade)
-│   ├── volume.py                     Steps 2 + 3: grid + volume + heights, BuildingResult
-│   ├── area.py                       Step 4: GWR enrichment + floor area
-│   ├── tile_fetcher.py               On-demand tile download
-│   ├── tests/                        pytest suite — see python/tests/README.md
-│   └── requirements.txt
-├── experimental/                  ← Standalone exploration tools (not in main pipeline)
-│   ├── mesh-builder/                 Watertight 3D building hulls + viewer ★
-│   ├── roof-shape-from-buildings3d/  Roof shape from swissBUILDINGS3D 3D meshes
-│   ├── green-roof-from-rs/           Green roof coverage via NDVI on swissIMAGE-RS
-│   └── floor-level-estimator/        Earlier per-floor estimator with gbaup factor
-├── fme/                           ← FME workbenches — see fme/README.md
-│   ├── README.md                     Volume Estimator pipeline summary
-│   ├── Volume Estimator FME.fmw      The main workbench (Steps 1–3)
-│   └── experimental/                 Older / unmaintained workbenches
-│       ├── green-roof-eval/             Green roof detection from swissIMAGE RS
-│       └── roof-estimator-deprecated/   Earlier FME version of the roof estimator
-├── docs/
-│   ├── Height Assumptions.md         Validation study for the floor-height table
-│   └── 20260112_GruenflaechenInventar.pdf   Reference document for the green-roof tool
-├── legacy/                        ← Original implementations (historical reference, untouched)
-├── data/                          ← .gitignored except example.csv
-│   └── example.csv                   Demo data for both web app and Python CLI
-└── assets/                        ← Images used by the READMEs and the web app
-```
+- **Preview:** requires [FME Form](https://fme.safe.com/fme-form/) (commercial licence)
+- **Source code:** [`fme/`](fme/)
 
 ---
 
 ## Experimental tools
 
-Self-contained tools that aren't part of the main pipeline live in [experimental/](experimental/). Each is independently runnable and has its own README.
+Standalone exploration tools that aren't part of the main pipeline. Each is independently runnable with its own README.
 
 | Tool | Status | What it does |
 |---|---|---|
-| [experimental/mesh-builder/](experimental/mesh-builder/) | working | Watertight 3D building hulls from AV cadastral footprints + swisstopo DSM/DTM rasters, with an in-browser three.js viewer |
-| [experimental/roof-shape-from-buildings3d/](experimental/roof-shape-from-buildings3d/) | working | Per-building roof characteristics (area, slope, shape, height) by analysing swissBUILDINGS3D 3D mesh geometry |
-| [experimental/green-roof-from-rs/](experimental/green-roof-from-rs/) | working | Per-building green roof coverage via NDVI on swissIMAGE-RS multispectral imagery |
-| [experimental/floor-level-estimator/](experimental/floor-level-estimator/) | unmaintained | Earlier per-floor estimator with construction-period (gbaup) factor |
+| [`experimental/mesh-builder/`](experimental/mesh-builder/) | working | Watertight 3D building hulls from AV footprints + swisstopo DSM/DTM, with an in-browser three.js viewer |
+| [`experimental/roof-shape-from-buildings3d/`](experimental/roof-shape-from-buildings3d/) | working | Per-building roof characteristics (area, slope, shape) from swissBUILDINGS3D meshes |
+| [`experimental/green-roof-from-rs/`](experimental/green-roof-from-rs/) | working | Per-building green-roof coverage via NDVI on swissIMAGE-RS imagery |
+| [`experimental/floor-level-estimator/`](experimental/floor-level-estimator/) | unmaintained | Earlier per-floor estimator with construction-period (gbaup) factor |
 
----
+## Data & Documentation
 
-## Future Development
+> **Data coverage note:** Most cantons are available via the geodienste.ch WFS. Three cantons (JU, LU, VD) don't publish data there, so both the Web App and the Python CLI's `--use-api` mode fall back to swisstopo vec25 footprints (lower accuracy, ~2-year update cycle). Coverage can also be incomplete in TI and VS.
 
-| Feature | Description |
-|---------|-------------|
-| Roof geometry estimation | Classify roof shapes (flat, gable, hip) and estimate roof surface areas |
-| Outer wall quantities | Estimate exterior wall areas from footprint perimeter and height metrics |
-| Material classification | Building material detection from imagery or other data sources |
-| International buildings | Extend beyond Switzerland using alternative elevation and cadastral data |
-| Eaves-height floor count | Use `elevation_roof_min − elevation_base_min` (≈ eaves height for pitched roofs) as the input to floor counting instead of `height_minimal`. Equivalent for flat roofs, more accurate for SFH/MFH with attics: `height_minimal` sits between eaves and ridge and slightly over-counts floors. Cheap to add as an extra `height_eaves_m` column in Step 3. |
-| Voxel-slice GFA estimation | Replace `footprint × floors` with horizontal slab integration over the per-cell heightfield: for each slab `k`, count cells where building height ≥ slab ceiling, multiply by cell area, sum across slabs. Naturally handles setbacks, attics, towers, dormers, and stepped buildings — cases where the current method silently overcounts because it assumes every floor is the full footprint. Open questions to investigate: (1) cell-qualification rule (strict vs. centerline vs. tunable threshold for partial floors), (2) sensitivity to the assumed floor height, (3) handling of trees-over-buildings noise, (4) per-floor slab areas in the output as a JSON column. Should be opt-in via `--gfa-method slice` and validated against buildings with known drawings before becoming the default. |
+- **Data sources** — building geometry from the official cadastral survey [Amtliche Vermessung](https://www.geodienste.ch/services/av) (AV); building classification from the federal register [GWR](https://www.housing-stat.ch/); terrain and surface elevation from swisstopo [swissALTI3D](https://www.swisstopo.admin.ch/de/hoehenmodell-swissalti3d) and [swissSURFACE3D](https://www.swisstopo.admin.ch/de/hoehenmodell-swisssurface3d-raster). CRS: EPSG:2056 (CH1903+ / LV95).
+- **[Technical Specification](docs/SPECIFICATION.md)** — the 4-step pipeline, AV vs GWR data model, limitations, methodology, and roadmap.
+- **[Height Assumptions](docs/Height%20Assumptions.md)** — validation study behind the floor-height lookup table and accuracy buckets.
 
----
-
-## References
+## Standards & References
 
 | Resource | Link |
 |----------|------|
 | Amtliche Vermessung (AV) | [geodienste.ch/services/av](https://www.geodienste.ch/services/av) |
-| swissALTI3D | [swisstopo.admin.ch](https://www.swisstopo.admin.ch/de/hoehenmodell-swissalti3d) |
-| swissSURFACE3D Raster | [swisstopo.admin.ch](https://www.swisstopo.admin.ch/de/hoehenmodell-swisssurface3d-raster) |
-| swisstopo Search API | [docs.geo.admin.ch](https://docs.geo.admin.ch/access-data/search.html) |
-| swisstopo Find API | [docs.geo.admin.ch](https://docs.geo.admin.ch/access-data/find-features.html) |
-| GWR | [housing-stat.ch](https://www.housing-stat.ch/de/index.html) |
-| GWR Public Data | [housing-stat.ch/data](https://www.housing-stat.ch/de/data/supply/public.html) |
-| GWR Catalog v4.3 | [housing-stat.ch/catalog](https://www.housing-stat.ch/catalog/en/4.3/final) |
-| Canton Zurich Methodology | Seiler & Seiler GmbH, Dec 2020 — [are.zh.ch](https://are.zh.ch/) |
-| DM.01-AV-CH Data Model | [cadastre-manual.admin.ch](https://www.cadastre-manual.admin.ch/de/datenmodell-der-amtlichen-vermessung-dm01-av-ch) |
-| Height assumptions validation study | [docs/Height Assumptions.md](docs/Height%20Assumptions.md) |
-
----
-
-## Tech Stack & Credits
-
-### Web App
-
-| Library | Version | Purpose |
-|---------|---------|---------|
-| [MapLibre GL JS](https://maplibre.org/) | 4.7 | Interactive map with 3D fill-extrusion rendering |
-| [GeoTIFF.js](https://geotiffjs.github.io/) | 2.1 | Cloud Optimized GeoTIFF (COG) reading in-browser |
-| [Turf.js](https://turfjs.org/) | 7 | Spatial operations (point-in-polygon, distance, centroid) |
-| [proj4js](http://proj4js.org/) | 2.12 | Coordinate transforms (WGS84 ↔ LV95/EPSG:2056) |
-| [SheetJS (XLSX)](https://sheetjs.com/) | 0.18 | Excel import/export (lazy-loaded) |
-| [Source Sans 3](https://fonts.google.com/specimen/Source+Sans+3) | — | Typography |
-| [Material Symbols](https://fonts.google.com/icons) | — | UI icons |
-
-### Python CLI
-
-| Library | Purpose |
-|---------|---------|
-| [GeoPandas](https://geopandas.org/) | Vector geodata processing |
-| [Rasterio](https://rasterio.readthedocs.io/) | GeoTIFF reading with windowed access |
-| [Shapely](https://shapely.readthedocs.io/) | Geometry operations, minimum rotated rectangle |
-| [NumPy](https://numpy.org/) | Vectorized grid creation and elevation sampling |
-| [pyproj](https://pyproj4.github.io/pyproj/) | CRS transforms |
-
-### Data Sources
-
-| Provider | Dataset | Usage |
-|----------|---------|-------|
-| [swisstopo](https://www.swisstopo.admin.ch/) | swissALTI3D, swissSURFACE3D | Terrain (DTM) and surface (DSM) elevation models at 0.5m resolution |
-| [swisstopo](https://www.swisstopo.admin.ch/) | vec25 Gebäude (via MapServer identify) | Building footprints fallback for cantons not on geodienste.ch |
-| [geodienste.ch](https://www.geodienste.ch/) | Amtliche Vermessung (AV) WFS | Building footprints from official cadastral survey |
-| [BFS](https://www.bfs.admin.ch/) | GWR (Gebäude- und Wohnungsregister) | Building classification, construction year, floor count |
-| [CARTO](https://carto.com/) | Positron, Dark Matter | Basemap tiles |
-
-### Methodology
-
-Floor area estimation is based on the methodology developed by Seiler & Seiler GmbH (Dec 2020) for the [Canton of Zurich ARE](https://are.zh.ch/). The per-GWR-code accuracy buckets are derived from an independent validation against Swiss regulatory anchors (ArGV4, SIA 2024, cantonal building codes) — see [docs/Height Assumptions.md](docs/Height%20Assumptions.md).
-
----
+| swissALTI3D (terrain, DTM) | [swisstopo.admin.ch](https://www.swisstopo.admin.ch/de/hoehenmodell-swissalti3d) |
+| swissSURFACE3D (surface, DSM) | [swisstopo.admin.ch](https://www.swisstopo.admin.ch/de/hoehenmodell-swisssurface3d-raster) |
+| GWR (building register) | [housing-stat.ch](https://www.housing-stat.ch/de/index.html) |
+| DM.01-AV-CH data model | [cadastre-manual.admin.ch](https://www.cadastre-manual.admin.ch/de/datenmodell-der-amtlichen-vermessung-dm01-av-ch) |
+| Floor-area methodology | Seiler & Seiler GmbH (2020) for [Canton Zurich ARE](https://are.zh.ch/) |
 
 ## License
 
-MIT License — see [LICENSE](LICENSE).
+[MIT](LICENSE) — see [LICENSE](LICENSE).

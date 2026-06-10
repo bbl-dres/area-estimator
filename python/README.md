@@ -2,7 +2,7 @@
 
 Open-source command-line implementation of the pipeline. Requires Python 3.10+ and free dependencies. Processes locally with exact LV95 areas and local elevation tiles.
 
-For the project overview, web app, and high-level pipeline description, see the [main README](../README.md).
+For the project overview and the other solutions, see the [main README](../README.md). For the high-level pipeline, AV vs GWR data model, and limitations, see the [Technical Specification](../docs/SPECIFICATION.md).
 
 ---
 
