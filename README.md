@@ -1,7 +1,5 @@
 # Swiss Building Volume & Area Estimator
 
-Estimate above-ground building volumes and gross floor areas from public Swiss elevation, cadastral, and GWR data.
-
 [![Swiss Building Volume & Area Estimator — open the live app](assets/social-preview.jpg)](https://bbl-dres.github.io/area-estimator/)
 
 [![Demo](https://img.shields.io/badge/demo-GitHub%20Pages-2ea44f?logo=github&logoColor=white)](https://bbl-dres.github.io/area-estimator/)
@@ -9,6 +7,8 @@ Estimate above-ground building volumes and gross floor areas from public Swiss e
 
 > [!CAUTION]
 > This is an experimental estimator. Validate its results before using them for planning or other consequential decisions.
+
+Estimate above-ground building volumes and gross floor areas from public Swiss elevation, cadastral, and GWR data.
 
 ## Demo
 
