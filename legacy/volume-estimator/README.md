@@ -19,11 +19,11 @@ The calculation is based on a voxel approach: creating a 1×1 meter grid within 
 - Flexible output (CSV export and/or database update)
 
 <p align="center">
-  <img src="images/Preview_2.jpg" width="45%" />
-  <img src="images/Preview_3.jpg" width="45%" />
+  <img src="images/preview-2.jpg" width="45%" />
+  <img src="images/preview-3.jpg" width="45%" />
 </p>
 <p align="center">
-  <img src="images/Preview_4.jpg" />
+  <img src="images/preview-4.jpg" />
 </p>
 
 ---

@@ -1,6 +1,6 @@
 # Mesh Builder (experimental)
 
-![Mesh Builder preview — watertight building hull rendered in the inspector with surface colouring (red roof, light walls, dark floor)](Preview1.jpg)
+![Mesh Builder preview — watertight building hull rendered in the inspector with surface colouring (red roof, light walls, dark floor)](preview-1.jpg)
 
 Build watertight 3D mesh hulls for buildings, footprint-exact, from a swisstopo
 GeoTIFF DSM/DTM and an AV cadastral footprint. For GIS visualisation, not
@@ -149,7 +149,7 @@ origin needed to recover global coordinates from the locally-translated mesh:
 | [viewer.html](viewer.html) | Standalone three.js inspector (drag-and-drop OBJ/PLY/STL/glTF), surface colouring, in-browser stats + roof classifier |
 | [requirements.txt](requirements.txt) | Adds `trimesh`, `triangle`, and `scipy` on top of parent requirements |
 | [RESEARCH.md](RESEARCH.md) | Living research doc — tools, papers, datasets, standards relevant to building reconstruction |
-| [Preview1.jpg](Preview1.jpg) | Preview screenshot (the hero image at the top of this README) |
+| [preview-1.jpg](preview-1.jpg) | Preview screenshot (the hero image at the top of this README) |
 | [README.md](README.md) | This file |
 
 ## Data sources
